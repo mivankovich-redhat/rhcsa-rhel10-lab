@@ -1,0 +1,10 @@
+# OS/editor
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# generated / temp
+*.log
+tmp/
