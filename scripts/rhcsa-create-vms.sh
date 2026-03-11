@@ -12,20 +12,23 @@ set -euo pipefail
 # - Reserve IPs in libvirt network via `virsh net-update ... ip-dhcp-host`
 #
 # UEFI note:
-# - With pflash/UEFI, libvirt internal snapshots are not supported.
-# - Use external disk-only snapshots:
-#     sudo virsh snapshot-create-as vm1 clean --disk-only --atomic --description "..."
-#     sudo virsh snapshot-create-as vm2 clean --disk-only --atomic --description "..."
+# - Do NOT use libvirt snapshot-revert workflows for this lab.
+# - Internal snapshots are unsupported with pflash/UEFI, and external overlays
+#   can leave the VM in awkward states.
+# - This repo uses baseline qcow2 copies instead:
+#     vm1.base.qcow2 -> vm1.qcow2
+#     vm2.base.qcow2 -> vm2.qcow2
+#   via `rhcsa-reset-to-clean.sh`.
 #
 # Usage:
-#   chmod +x ~/scripts/rhcsa-create-vms.sh
-#   ~/scripts/rhcsa-create-vms.sh
+#   chmod +x scripts/rhcsa-create-vms.sh
+#   ./scripts/rhcsa-create-vms.sh
 #
 # Overrides:
-#   ISO=/path/to/rhel-10.1-x86_64-dvd.iso RAM_MB=8192 VCPUS=4 DISK_GB=60 ~/scripts/rhcsa-create-vms.sh
+#   ISO=/path/to/rhel-10.1-x86_64-dvd.iso RAM_MB=8192 VCPUS=4 DISK_GB=60 ./scripts/rhcsa-create-vms.sh
 #
 # Static DHCP overrides:
-#   VM1_IP=192.168.122.31 VM2_IP=192.168.122.66 VM1_MAC=... VM2_MAC=... ~/scripts/rhcsa-create-vms.sh
+#   VM1_IP=192.168.122.31 VM2_IP=192.168.122.66 VM1_MAC=52:54:00:aa:bb:31 VM2_MAC=52:54:00:aa:bb:66 ./scripts/rhcsa-create-vms.sh
 
 ISO="${ISO:-/var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso}"
 POOL_DIR="${POOL_DIR:-/var/lib/libvirt/images/rhcsa}"
@@ -39,26 +42,31 @@ NET_NAME="${NET_NAME:-default}" # libvirt NAT network (virbr0 192.168.122.0/24 t
 VM1_NAME="${VM1_NAME:-vm1}"
 VM2_NAME="${VM2_NAME:-vm2}"
 
-# Defaults set to your current MACs:
+# Stable MACs (must be unique; 52:54:00 is qemu OUI)
 VM1_MAC="${VM1_MAC:-52:54:00:d8:8d:2e}"
 VM2_MAC="${VM2_MAC:-52:54:00:6d:66:99}"
 
-# Reserved IPs:
+# Reserved IPs (must match your NAT subnet; default is 192.168.122.0/24)
 VM1_IP="${VM1_IP:-192.168.122.31}"
 VM2_IP="${VM2_IP:-192.168.122.66}"
 
 VM1_DISK="${VM1_DISK:-$POOL_DIR/vm1.qcow2}"
 VM2_DISK="${VM2_DISK:-$POOL_DIR/vm2.qcow2}"
 
-OS_VARIANT="${OS_VARIANT:-rhel10.0}"
+OS_VARIANT="${OS_VARIANT:-rhel10.0}" # virt-install naming; rhel10.0 is fine for 10.1
 GRAPHICS="${GRAPHICS:-spice}"        # spice | vnc | none (headless)
 UEFI="${UEFI:-1}"                    # 1 to use UEFI
 
 require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || { echo "ERROR: missing required command: $1" >&2; exit 1; }
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "ERROR: missing required command: $1" >&2
+    exit 1
+  }
 }
 
-vm_exists() { sudo virsh dominfo "$1" >/dev/null 2>&1; }
+vm_exists() {
+  sudo virsh dominfo "$1" >/dev/null 2>&1
+}
 
 create_disk() {
   local path="$1"
@@ -97,9 +105,12 @@ net_reserve_ip() {
   local name="$1"
   local mac="$2"
   local ip="$3"
-  local xml="<host mac='${mac}' name='${name}' ip='${ip}'/>"
+
+  local xml
+  xml="<host mac='${mac}' name='${name}' ip='${ip}'/>"
 
   echo "==> Reserving DHCP: ${name} -> ${ip} (${mac}) on network '${NET_NAME}'"
+
   sudo virsh net-update "$NET_NAME" delete ip-dhcp-host "${xml}" --live --config >/dev/null 2>&1 || true
   sudo virsh net-update "$NET_NAME" add ip-dhcp-host "${xml}" --live --config >/dev/null
 }
@@ -150,6 +161,8 @@ sudo chmod 0775 "$POOL_DIR"
 
 if [[ ! -f "$ISO" ]]; then
   echo "ERROR: ISO not found at: $ISO" >&2
+  echo "Place your ISO at: /var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso" >&2
+  echo "or run with: ISO=/path/to/rhel-10.1-x86_64-dvd.iso ./scripts/rhcsa-create-vms.sh" >&2
   exit 1
 fi
 
@@ -185,15 +198,20 @@ sudo virsh net-dhcp-leases "$NET_NAME" || true
 
 cat <<EOF
 
-Notes:
-- If guests already have a lease, they may keep it until reboot or NM restart.
-
-On each guest:
-  nmcli con show --active
-  sudo nmcli con down <CONN>; sudo nmcli con up <CONN>
-
-UEFI snapshots (external):
-  sudo virsh snapshot-create-as $VM1_NAME clean --disk-only --atomic --description "Baseline"
-  sudo virsh snapshot-create-as $VM2_NAME clean --disk-only --atomic --description "Baseline"
+Next steps:
+1) Complete the RHEL install in the console(s) (virt-manager or virt-viewer).
+2) After first boot, get guest IPs:
+     sudo virsh domifaddr $VM1_NAME
+     sudo virsh domifaddr $VM2_NAME
+     sudo virsh net-dhcp-leases $NET_NAME
+3) Set hostnames inside guests:
+     sudo hostnamectl set-hostname $VM1_NAME
+     sudo hostnamectl set-hostname $VM2_NAME
+4) Install guest agent inside guests (recommended):
+     sudo dnf -y install qemu-guest-agent
+     sudo systemctl enable --now qemu-guest-agent
+5) Create your golden baselines once the guests are in the desired clean state:
+     sudo cp -f $VM1_DISK $POOL_DIR/${VM1_NAME}.base.qcow2
+     sudo cp -f $VM2_DISK $POOL_DIR/${VM2_NAME}.base.qcow2
 
 EOF

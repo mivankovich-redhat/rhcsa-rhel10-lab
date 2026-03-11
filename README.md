@@ -1,73 +1,186 @@
-# RHCSA RHEL 10 Lab (KVM/libvirt + NAT)
+# RHCSA RHEL 10 Lab (KVM/libvirt + NAT + 2 VMs)
 
-A small, deterministic RHCSA practice lab on an Ubuntu host using KVM/libvirt with the default NAT network.
+A deterministic RHCSA practice lab on an Ubuntu host using KVM/libvirt with the default NAT network (`default` / `virbr0`) and **two RHEL 10 VMs**:
 
-## What you get
-- Two RHEL VMs: `vm1` and `vm2`
-- NAT network: libvirt `default` (bridge `virbr0`, typically `192.168.122.0/24`)
-- Stable addressing (in practice):  
-  - `vm1` → `192.168.122.31`  
-  - `vm2` → `192.168.122.66`
-- One-command flows:
-  - bring lab up/down
-  - show full status
-  - reset to “clean” via baseline disk copy (UEFI-safe)
+- `vm1` → `192.168.122.31`
+- `vm2` → `192.168.122.66`
+
+This repo also includes a reset model that avoids libvirt snapshot-revert issues on UEFI/pflash guests:
+
+- keep `*.base.qcow2` golden baselines
+- reset by copying baseline → active disk and restarting VMs
+
+---
 
 ## Repo layout
-- `scripts/`
-  - `rhcsa-up.sh` – start libvirtd/network/virbr0 + boot VMs
-  - `rhcsa-down.sh` – clean shutdown VMs
-  - `rhcsa-status.sh` – high-signal health/status report
-  - `rhcsa-reset-to-clean.sh` – reset active disks from baseline + restart VMs
-  - `rhcsa-destroy-vms.sh` – hard destroy VMs + disks
-  - `rhcsa-create-vms.sh` – create disks + VMs from ISO (installer-driven)
-  - `rhcsa-tmux.sh` – tmux helper (optional)
-  - `rhcsa.sh` – tmux “driver” that brings lab up and attaches panes (if present)
 
-## Prereqs (host)
+- `scripts/`
+  - `rhcsa-create-vms.sh` — create VMs on NAT network (with stable MACs + DHCP reservations)
+  - `rhcsa-up.sh` — bring libvirt/network up and start VMs
+  - `rhcsa-down.sh` — shut down VMs cleanly
+  - `rhcsa-status.sh` — health/status report for host + network + VMs + disks
+  - `rhcsa-reset-to-clean.sh` — deterministic reset (baseline disk copy)
+  - `rhcsa-destroy-vms.sh` — **irreversible** destroy (VM defs + disks)
+  - `rhcsa-tmux.sh` — tmux session with panes: host / vm1 / vm2
+  - `rhcsa.sh` — tmux driver (if present)
+
+- `docs/`
+  - `runbook.md` — detailed runbook + troubleshooting
+
+---
+
+## Prereqs (Ubuntu host)
+
+Install the host packages you need:
+
 ```bash
 sudo apt update
-sudo apt install -y qemu-kvm libvirt-daemon-system libvirt-clients virtinst virt-manager tmux
-sudo usermod -aG libvirt,kvm $USER
-newgrp libvirt
+sudo apt install -y \
+  qemu-kvm libvirt-daemon-system libvirt-clients virtinst \
+  virt-manager virt-viewer qemu-utils tmux
+```
 
-Enable libvirt:
+Confirm libvirt is healthy:
 
+```bash
 sudo systemctl enable --now libvirtd
-Quick start
-cd scripts
-./rhcsa-up.sh
-./rhcsa-status.sh
+sudo virsh --connect qemu:///system net-info default
+```
 
-SSH (if your ~/.ssh/config has Host entries for vm1/vm2):
+---
 
-ssh vm1
-ssh vm2
-Baseline model (important)
+## ISO placement (recommended)
 
-This lab avoids libvirt snapshot-revert (UEFI/pflash + external snapshots can wedge).
+Put the RHEL 10.1 ISO somewhere libvirt/QEMU can read **without** home-directory permission issues.
 
-Instead:
+Recommended:
 
-Baseline images:
+```bash
+sudo mkdir -p /var/lib/libvirt/images/iso
+sudo cp -v ~/iso/rhel-10.1-x86_64-dvd.iso /var/lib/libvirt/images/iso/
+sudo chown -R root:libvirt /var/lib/libvirt/images/iso
+sudo chmod -R 0775 /var/lib/libvirt/images/iso
+sudo chmod 0664 /var/lib/libvirt/images/iso/*.iso
+```
 
-/var/lib/libvirt/images/rhcsa/vm1.base.qcow2
+---
 
-/var/lib/libvirt/images/rhcsa/vm2.base.qcow2
+## One-time: create the VMs
 
-Active images:
+```bash
+chmod +x scripts/*.sh
+./scripts/rhcsa-create-vms.sh
+```
 
-/var/lib/libvirt/images/rhcsa/vm1.qcow2
+Then complete the OS installs in `virt-manager` or `virt-viewer`.
 
-/var/lib/libvirt/images/rhcsa/vm2.qcow2
+After first boot inside each guest, set hostnames:
 
-Reset is a simple copy: base -> active, then reboot VMs.
+```bash
+sudo hostnamectl set-hostname vm1   # on vm1
+sudo hostnamectl set-hostname vm2   # on vm2
+```
 
-See RUNBOOK.md for the one-time “create baseline” procedure.
+Optional but recommended for nicer host-side visibility:
 
-Safety notes
+```bash
+sudo dnf -y install qemu-guest-agent
+sudo systemctl enable --now qemu-guest-agent
+```
 
-rhcsa-destroy-vms.sh deletes VM definitions + qcow2 disks. Use carefully.
+---
 
-Prefer rhcsa-reset-to-clean.sh for day-to-day practice resets.
+## One-time: host SSH convenience
 
+On the host, add `~/.ssh/config` entries (example):
+
+```sshconfig
+Host vm1
+  HostName 192.168.122.31
+  User student1
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+
+Host vm2
+  HostName 192.168.122.66
+  User student1
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+```
+
+Then test:
+
+```bash
+ssh vm1 'hostname && whoami'
+ssh vm2 'hostname && whoami'
+```
+
+---
+
+## One-time: create golden baselines for deterministic reset
+
+When both VMs are in your desired clean state:
+
+```bash
+POOL=/var/lib/libvirt/images/rhcsa
+
+sudo virsh destroy vm1 2>/dev/null || true
+sudo virsh destroy vm2 2>/dev/null || true
+
+sudo cp -f "$POOL/vm1.qcow2" "$POOL/vm1.base.qcow2"
+sudo cp -f "$POOL/vm2.qcow2" "$POOL/vm2.base.qcow2"
+
+sudo chown root:libvirt "$POOL/vm1.base.qcow2" "$POOL/vm2.base.qcow2"
+sudo chmod 0660 "$POOL/vm1.base.qcow2" "$POOL/vm2.base.qcow2"
+
+sudo virsh start vm1
+sudo virsh start vm2
+```
+
+From here on, `rhcsa-reset-to-clean.sh` resets by copying baseline → active.
+
+---
+
+## Daily workflow
+
+Bring lab up:
+
+```bash
+./scripts/rhcsa-up.sh
+./scripts/rhcsa-status.sh
+```
+
+Open tmux lab session (host + vm1 + vm2 panes):
+
+```bash
+./scripts/rhcsa-tmux.sh
+```
+
+Reset lab back to baseline:
+
+```bash
+./scripts/rhcsa-reset-to-clean.sh
+```
+
+Shut down:
+
+```bash
+./scripts/rhcsa-down.sh
+```
+
+Destroy everything (irreversible):
+
+```bash
+./scripts/rhcsa-destroy-vms.sh
+```
+
+---
+
+## Notes / gotchas
+
+- UEFI/pflash guests make libvirt internal snapshots unusable. Avoid `snapshot-revert`.
+- `qemu-img info` will fail with lock errors while the VM is running unless you use `qemu-img info -U`.
+- `virbr0` can show `NO-CARRIER` when no VMs are attached; it should become `UP` once VM vnet interfaces exist.
+- `virsh domifaddr` is best with `qemu-guest-agent` installed in guests.
+
+See `docs/runbook.md` for the full runbook + troubleshooting.

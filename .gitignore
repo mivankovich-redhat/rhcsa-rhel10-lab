@@ -8,3 +8,9 @@
 # generated / temp
 *.log
 tmp/
+
+# images
+*.tar.gz
+*.tar
+*.qcow2
+*.iso
