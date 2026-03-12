@@ -5,10 +5,67 @@ A deterministic RHCSA practice lab on an Ubuntu host using KVM/libvirt with the 
 - `vm1` → `192.168.122.31`
 - `vm2` → `192.168.122.66`
 
-This repo also includes a reset model that avoids libvirt snapshot-revert issues on UEFI/pflash guests:
+This repo uses a reset model that avoids libvirt snapshot-revert issues on UEFI/pflash guests:
 
 - keep `*.base.qcow2` golden baselines
 - reset by copying baseline → active disk and restarting VMs
+
+---
+
+## Source of truth
+
+Use the **repo copies** of the scripts under `./scripts/`.
+
+Run commands from the repo root:
+
+```bash
+cd ~/<REPO_ROOT>
+```
+
+Do not rely on older duplicate copies under `~/scripts` unless you intentionally keep both locations in sync.
+
+---
+
+## Preferred usage
+
+Preferred multi-pane entry point:
+
+```bash
+TMUX_SESSION=rhcsa ./scripts/rhcsa.sh
+```
+
+What `rhcsa.sh` does:
+
+- brings the lab up
+- prints status in the host pane
+- opens a tmux session
+- connects panes for `vm1` and `vm2`
+
+Simpler manual workflow:
+
+```bash
+./scripts/rhcsa-up.sh
+./scripts/rhcsa-status.sh
+./scripts/rhcsa-tmux.sh
+```
+
+Reset lab back to baseline:
+
+```bash
+./scripts/rhcsa-reset-to-clean.sh
+```
+
+Shut down:
+
+```bash
+./scripts/rhcsa-down.sh
+```
+
+Destroy everything (irreversible):
+
+```bash
+./scripts/rhcsa-destroy-vms.sh
+```
 
 ---
 
@@ -21,8 +78,8 @@ This repo also includes a reset model that avoids libvirt snapshot-revert issues
   - `rhcsa-status.sh` — health/status report for host + network + VMs + disks
   - `rhcsa-reset-to-clean.sh` — deterministic reset (baseline disk copy)
   - `rhcsa-destroy-vms.sh` — **irreversible** destroy (VM defs + disks)
-  - `rhcsa-tmux.sh` — tmux session with panes: host / vm1 / vm2
-  - `rhcsa.sh` — tmux driver (if present)
+  - `rhcsa-tmux.sh` — tmux helper with panes: host / vm1 / vm2
+  - `rhcsa.sh` — preferred tmux driver for the repo
 
 - `docs/`
   - `runbook.md` — detailed runbook + troubleshooting
@@ -49,19 +106,29 @@ sudo virsh --connect qemu:///system net-info default
 
 ---
 
-## ISO placement (recommended)
+## RHEL 10 ISO
 
-Put the RHEL 10.1 ISO somewhere libvirt/QEMU can read **without** home-directory permission issues.
+Download a RHEL 10 x86_64 DVD ISO using your Red Hat subscription and place it at:
 
-Recommended:
+`/var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso`
+
+Recommended host-side preparation:
 
 ```bash
 sudo mkdir -p /var/lib/libvirt/images/iso
-sudo cp -v ~/iso/rhel-10.1-x86_64-dvd.iso /var/lib/libvirt/images/iso/
+sudo cp -v ~/Downloads/rhel-10.1-x86_64-dvd.iso /var/lib/libvirt/images/iso/
 sudo chown -R root:libvirt /var/lib/libvirt/images/iso
 sudo chmod -R 0775 /var/lib/libvirt/images/iso
 sudo chmod 0664 /var/lib/libvirt/images/iso/*.iso
 ```
+
+The create script uses that path by default. Override if needed:
+
+```bash
+ISO=/path/to/rhel-10.1-x86_64-dvd.iso ./scripts/rhcsa-create-vms.sh
+```
+
+The create script provisions the VM qcow2 disks automatically under `/var/lib/libvirt/images/rhcsa/`; no manual `qemu-img create` step is normally required.
 
 ---
 
@@ -138,41 +205,6 @@ sudo virsh start vm2
 ```
 
 From here on, `rhcsa-reset-to-clean.sh` resets by copying baseline → active.
-
----
-
-## Daily workflow
-
-Bring lab up:
-
-```bash
-./scripts/rhcsa-up.sh
-./scripts/rhcsa-status.sh
-```
-
-Open tmux lab session (host + vm1 + vm2 panes):
-
-```bash
-./scripts/rhcsa-tmux.sh
-```
-
-Reset lab back to baseline:
-
-```bash
-./scripts/rhcsa-reset-to-clean.sh
-```
-
-Shut down:
-
-```bash
-./scripts/rhcsa-down.sh
-```
-
-Destroy everything (irreversible):
-
-```bash
-./scripts/rhcsa-destroy-vms.sh
-```
 
 ---
 

@@ -11,13 +11,47 @@ This runbook documents the RHCSA RHEL10 two-VM lab environment:
 Reset model:
 
 - Maintain golden baselines:
+
   - `/var/lib/libvirt/images/rhcsa/vm1.base.qcow2`
   - `/var/lib/libvirt/images/rhcsa/vm2.base.qcow2`
 - Reset by copying baseline → active qcow2 and restarting VMs (UEFI-safe, avoids snapshot-revert issues).
 
 ---
 
-## 0) Quick health check
+## 0) Source of truth and preferred entry point
+
+Run all lab scripts from the repo root:
+
+```bash
+cd ~/<REPO_ROOT>
+```
+
+Preferred entry point:
+
+```bash
+TMUX_SESSION=rhcsa ./scripts/rhcsa.sh
+```
+
+That driver:
+
+- brings the lab up
+- prints status in the host pane
+- opens tmux
+- connects panes for `vm1` and `vm2`
+
+Simpler helper flow:
+
+```bash
+./scripts/rhcsa-up.sh
+./scripts/rhcsa-status.sh
+./scripts/rhcsa-tmux.sh
+```
+
+Older duplicates under `~/scripts` should be considered legacy copies unless you intentionally keep them synchronized.
+
+---
+
+## 1) Quick health check
 
 ```bash
 ./scripts/rhcsa-status.sh
@@ -34,7 +68,7 @@ Expected:
 
 ---
 
-## 1) Host prerequisites
+## 2) Host prerequisites
 
 Install packages:
 
@@ -54,7 +88,7 @@ sudo virsh --connect qemu:///system uri
 
 ---
 
-## 2) Network: libvirt NAT default
+## 3) Network: libvirt NAT default
 
 Confirm:
 
@@ -77,23 +111,43 @@ Notes:
 
 ---
 
-## 3) ISO placement
+## 4) RHEL 10 ISO and disk provisioning
 
-Place ISO somewhere QEMU can read without home-directory permission problems.
+This repo assumes you already have access to a RHEL 10 DVD ISO through your Red Hat subscription.
 
-Recommended:
+Recommended host location:
 
 ```bash
 sudo mkdir -p /var/lib/libvirt/images/iso
-sudo cp -v ~/iso/rhel-10.1-x86_64-dvd.iso /var/lib/libvirt/images/iso/
+sudo cp -v ~/Downloads/rhel-10.1-x86_64-dvd.iso /var/lib/libvirt/images/iso/
 sudo chown -R root:libvirt /var/lib/libvirt/images/iso
 sudo chmod -R 0775 /var/lib/libvirt/images/iso
 sudo chmod 0664 /var/lib/libvirt/images/iso/*.iso
 ```
 
+By default, `scripts/rhcsa-create-vms.sh` expects:
+
+```text
+/var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso
+```
+
+Override if needed:
+
+```bash
+ISO=/path/to/rhel-10.1-x86_64-dvd.iso ./scripts/rhcsa-create-vms.sh
+```
+
+The script creates the VM qcow2 disks automatically under:
+
+```text
+/var/lib/libvirt/images/rhcsa/
+```
+
+No manual `qemu-img create` step is normally required.
+
 ---
 
-## 4) Create VMs (one-time)
+## 5) Create VMs (one-time)
 
 ```bash
 chmod +x scripts/*.sh
@@ -110,16 +164,16 @@ Complete OS installs via `virt-manager` or `virt-viewer`.
 
 ---
 
-## 5) Guest post-install checklist (both VMs)
+## 6) Guest post-install checklist (both VMs)
 
-### 5.1 Hostnames
+### 6.1 Hostnames
 
 ```bash
 sudo hostnamectl set-hostname vm1   # on vm1
 sudo hostnamectl set-hostname vm2   # on vm2
 ```
 
-### 5.2 qemu-guest-agent (recommended)
+### 6.2 qemu-guest-agent (recommended)
 
 Improves `virsh domifaddr` and some VM introspection:
 
@@ -128,7 +182,7 @@ sudo dnf -y install qemu-guest-agent
 sudo systemctl enable --now qemu-guest-agent
 ```
 
-### 5.3 SSH access
+### 6.3 SSH access
 
 From host:
 
@@ -160,7 +214,7 @@ ssh vm2 'hostname && whoami'
 
 ---
 
-## 6) Baseline strategy (critical)
+## 7) Baseline strategy (critical)
 
 ### Why not libvirt snapshots?
 
@@ -193,18 +247,19 @@ Tip: only refresh baselines when you intentionally want a new clean point.
 
 ---
 
-## 7) Day-to-day operations
+## 8) Day-to-day operations
 
-### Bring up
+### Preferred driver
+
+```bash
+TMUX_SESSION=rhcsa ./scripts/rhcsa.sh
+```
+
+### Simpler helper flow
 
 ```bash
 ./scripts/rhcsa-up.sh
 ./scripts/rhcsa-status.sh
-```
-
-### Work in tmux session
-
-```bash
 ./scripts/rhcsa-tmux.sh
 ```
 
@@ -228,9 +283,51 @@ Tip: only refresh baselines when you intentionally want a new clean point.
 
 ---
 
-## 8) Troubleshooting
+## 9) Optional: passwordless sudo for lab automation
 
-### 8.1 `virbr0` shows DOWN
+This step is optional. It reduces repeated sudo prompts for host-side lab automation, but it grants passwordless access to a limited set of libvirt/network management commands. Review it before enabling.
+
+Create `/etc/sudoers.d/rhcsa-lab`:
+
+```bash
+sudo tee /etc/sudoers.d/rhcsa-lab >/dev/null <<'EOF'
+# Passwordless sudo for RHCSA libvirt lab automation
+# Replace <your-username> with your local Linux username.
+
+User_Alias RHCSAUSER = <your-username>
+
+Cmnd_Alias RHCSA_SYSTEMCTL = \
+  /bin/systemctl enable --now libvirtd, \
+  /bin/systemctl restart libvirtd, \
+  /bin/systemctl is-active --quiet libvirtd
+
+Cmnd_Alias RHCSA_VIRSH = /usr/bin/virsh *, /bin/virsh *
+
+Cmnd_Alias RHCSA_IP = \
+  /usr/sbin/ip link set virbr0 up, \
+  /usr/sbin/ip link show virbr0, \
+  /usr/sbin/ip -br a
+
+RHCSAUSER ALL=(root) NOPASSWD: RHCSA_SYSTEMCTL, RHCSA_VIRSH, RHCSA_IP
+EOF
+
+sudo chmod 0440 /etc/sudoers.d/rhcsa-lab
+sudo visudo -cf /etc/sudoers.d/rhcsa-lab
+```
+
+Validate:
+
+```bash
+sudo -n true && echo "NOPASSWD works"
+sudo -n virsh list --all
+sudo -n systemctl is-active --quiet libvirtd && echo "libvirtd active"
+```
+
+---
+
+## 10) Troubleshooting
+
+### 10.1 `virbr0` shows DOWN
 
 If `virbr0` is `DOWN` before VMs start, that may be normal. If it stays down after starting VMs:
 
@@ -241,7 +338,7 @@ sudo virsh net-start default
 ip -br a | grep virbr0
 ```
 
-### 8.2 `virsh domifaddr` says domain is not running
+### 10.2 `virsh domifaddr` says domain is not running
 
 Start the VMs:
 
@@ -250,7 +347,7 @@ sudo virsh start vm1
 sudo virsh start vm2
 ```
 
-### 8.3 `virsh domifaddr` empty / unreliable
+### 10.3 `virsh domifaddr` empty / unreliable
 
 Install guest agent in the VM:
 
@@ -265,7 +362,7 @@ Fallback on host:
 sudo virsh net-dhcp-leases default
 ```
 
-### 8.4 `qemu-img info` fails with lock errors
+### 10.4 `qemu-img info` fails with lock errors
 
 That’s expected when a VM holds a write lock. Use `-U`:
 
@@ -273,7 +370,7 @@ That’s expected when a VM holds a write lock. Use `-U`:
 sudo qemu-img info -U /var/lib/libvirt/images/rhcsa/vm1.qcow2
 ```
 
-### 8.5 SSH: No route to host
+### 10.5 SSH: No route to host
 
 Usually means VMs not up yet or `default` network/bridge not ready:
 
@@ -284,7 +381,7 @@ Usually means VMs not up yet or `default` network/bridge not ready:
 
 ---
 
-## 9) Cockpit notes (practice-friendly)
+## 11) Cockpit notes (practice-friendly)
 
 Enable cockpit:
 
@@ -300,12 +397,13 @@ Then access from host:
 
 ---
 
-## 10) Reference: scripts
+## 12) Reference: scripts
 
 - `scripts/rhcsa-up.sh` — start libvirt/network + VMs
 - `scripts/rhcsa-down.sh` — shut down VMs
 - `scripts/rhcsa-reset-to-clean.sh` — baseline disk-copy reset (UEFI-safe)
 - `scripts/rhcsa-status.sh` — health/status report
-- `scripts/rhcsa-tmux.sh` — tmux session (host/vm1/vm2 panes)
+- `scripts/rhcsa.sh` — preferred tmux driver
+- `scripts/rhcsa-tmux.sh` — tmux helper (host/vm1/vm2 panes)
 - `scripts/rhcsa-create-vms.sh` — create VMs + DHCP reservations
 - `scripts/rhcsa-destroy-vms.sh` — destroy VM defs + disks
