@@ -1,94 +1,79 @@
-# RHCSA RHEL 10 Lab (KVM/libvirt + NAT + 2 VMs)
+# RHCSA RHEL 10 Lab (KVM/libvirt, exam-style two-node topology)
 
-A deterministic RHCSA practice lab on an Ubuntu host using KVM/libvirt with the default NAT network (`default` / `virbr0`) and **two RHEL 10 VMs**:
+A reproducible RHCSA practice lab for an Ubuntu host using KVM/libvirt and a dedicated lab network.
 
-- `vm1` → `192.168.122.31`
-- `vm2` → `192.168.122.66`
+Validated topology:
 
-This repo uses a reset model that avoids libvirt snapshot-revert issues on UEFI/pflash guests:
+- `servera` — infrastructure node
+  - local HTTP package repo
+  - NFS server
+  - chrony source
+- `serverb` — primary exam/practice node
+  - storage practice (LVM / partitions / swap / filesystems)
+  - SELinux / firewall practice
+  - systemd and troubleshooting work
 
-- keep `*.base.qcow2` golden baselines
-- reset by copying baseline → active disk and restarting VMs
+Validated network and roles:
+
+- libvirt network: `rhcsa-lab`
+- bridge: `virbr-rhcsa`
+- subnet: `192.168.56.0/24`
+- `servera.lab.local` → `192.168.56.10`
+- `serverb.lab.local` → `192.168.56.20`
+
+The lab uses a deterministic baseline/reset model instead of libvirt snapshot-revert:
+
+- active disks live under `/var/lib/libvirt/images/rhcsa/`
+- clean baselines are captured as `*.base.qcow2`
+- reset restores baseline → active disk and restarts the VMs
+
+This workflow has been validated end to end.
 
 ---
 
-## Source of truth
+## What is validated
 
-Use the **repo copies** of the scripts under `./scripts/`.
+Tested and validated in this repo:
 
-Run commands from the repo root:
+- `scripts/rhcsa-create-vms.sh`
+- `scripts/rhcsa-up.sh`
+- `scripts/rhcsa-down.sh`
+- `scripts/rhcsa-reset-to-clean.sh`
+- `scripts/rhcsa-status.sh`
+- `scripts/rhcsa-destroy-vms.sh` (old lab teardown path validated; new topology lifecycle validated through create/reset/up/down)
+- `scripts/rhcsa-capture-baselines.sh`
+- `scripts/rhcsa-env.sh` as a dependency of the validated host-side scripts
 
-```bash
-cd ~/<REPO_ROOT>
-```
+Not part of the final validated workflow in this repo state:
 
-Do not rely on older duplicate copies under `~/scripts` unless you intentionally keep both locations in sync.
+- `scripts/bootstrap-servera.sh`
+- `scripts/bootstrap-serverb.sh`
+- `scripts/rhcsa-tmux.sh`
+- `scripts/rhcsa.sh`
 
----
-
-## Preferred usage
-
-Preferred multi-pane entry point:
-
-```bash
-TMUX_SESSION=rhcsa ./scripts/rhcsa.sh
-```
-
-What `rhcsa.sh` does:
-
-- brings the lab up
-- prints status in the host pane
-- opens a tmux session
-- connects panes for `vm1` and `vm2`
-
-Simpler manual workflow:
-
-```bash
-./scripts/rhcsa-up.sh
-./scripts/rhcsa-status.sh
-./scripts/rhcsa-tmux.sh
-```
-
-Reset lab back to baseline:
-
-```bash
-./scripts/rhcsa-reset-to-clean.sh
-```
-
-Shut down:
-
-```bash
-./scripts/rhcsa-down.sh
-```
-
-Destroy everything (irreversible):
-
-```bash
-./scripts/rhcsa-destroy-vms.sh
-```
+Those helpers can be validated in a follow-up change.
 
 ---
 
 ## Repo layout
 
 - `scripts/`
-  - `rhcsa-create-vms.sh` — create VMs on NAT network (with stable MACs + DHCP reservations)
-  - `rhcsa-up.sh` — bring libvirt/network up and start VMs
-  - `rhcsa-down.sh` — shut down VMs cleanly
-  - `rhcsa-status.sh` — health/status report for host + network + VMs + disks
-  - `rhcsa-reset-to-clean.sh` — deterministic reset (baseline disk copy)
-  - `rhcsa-destroy-vms.sh` — **irreversible** destroy (VM defs + disks)
-  - `rhcsa-tmux.sh` — tmux helper with panes: host / vm1 / vm2
-  - `rhcsa.sh` — preferred tmux driver for the repo
-
+  - `rhcsa-env.sh` — shared environment and defaults for the lab scripts
+  - `rhcsa-create-vms.sh` — create the two-node lab, network, and disk layout
+  - `rhcsa-up.sh` — start the lab
+  - `rhcsa-down.sh` — shut down the lab cleanly
+  - `rhcsa-status.sh` — inspect network, domains, disks, and baselines
+  - `rhcsa-capture-baselines.sh` — create clean baseline copies of all active disks
+  - `rhcsa-reset-to-clean.sh` — restore active disks from baseline copies
+  - `rhcsa-destroy-vms.sh` — irreversible destroy of the lab domains and disks
 - `docs/`
-  - `runbook.md` — detailed runbook + troubleshooting
+  - `runbook.md` — detailed build, validation, and troubleshooting notes
 
 ---
 
-## Prereqs (Ubuntu host)
+## Host prerequisites
 
-Install the host packages you need:
+Install required packages on Ubuntu:
 
 ```bash
 sudo apt update
@@ -97,22 +82,24 @@ sudo apt install -y \
   virt-manager virt-viewer qemu-utils tmux
 ```
 
-Confirm libvirt is healthy:
+Enable libvirt:
 
 ```bash
 sudo systemctl enable --now libvirtd
-sudo virsh --connect qemu:///system net-info default
+sudo virsh --connect qemu:///system uri
 ```
 
 ---
 
-## RHEL 10 ISO
+## Required RHEL ISO
 
-Download a RHEL 10 x86_64 DVD ISO using your Red Hat subscription and place it at:
+Place a RHEL 10 x86_64 DVD ISO at:
 
-`/var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso`
+```text
+/var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso
+```
 
-Recommended host-side preparation:
+Recommended host prep:
 
 ```bash
 sudo mkdir -p /var/lib/libvirt/images/iso
@@ -122,97 +109,170 @@ sudo chmod -R 0775 /var/lib/libvirt/images/iso
 sudo chmod 0664 /var/lib/libvirt/images/iso/*.iso
 ```
 
-The create script uses that path by default. Override if needed:
+Override if needed:
 
 ```bash
 ISO=/path/to/rhel-10.1-x86_64-dvd.iso ./scripts/rhcsa-create-vms.sh
 ```
 
-The create script provisions the VM qcow2 disks automatically under `/var/lib/libvirt/images/rhcsa/`; no manual `qemu-img create` step is normally required.
+---
+
+## Validated topology details
+
+### ServerA
+
+- hostname: `servera.lab.local`
+- IP: `192.168.56.10/24`
+- role: infrastructure node
+- OS disk:
+  - `vda` 20 GiB
+- services:
+  - Apache HTTP repo
+  - NFS server
+  - chronyd
+  - firewalld
+
+### ServerB
+
+- hostname: `serverb.lab.local`
+- IP: `192.168.56.20/24`
+- role: exam/practice node
+- disks:
+  - `vda` 20 GiB — OS disk only
+  - `vdb` 10 GiB — standard LVM / partition / swap tasks
+  - `vdc` 10 GiB — VDO / additional storage tasks
+  - `vdd` 2 GiB — spare disk
+  - `vde` 10 GiB — spare disk
+
+During OS installation on `serverb`, install to `vda` only and leave `vdb` / `vdc` / `vdd` / `vde` untouched.
 
 ---
 
-## One-time: create the VMs
+## One-time build flow
+
+### 1. Create the lab
 
 ```bash
 chmod +x scripts/*.sh
 ./scripts/rhcsa-create-vms.sh
 ```
 
-Then complete the OS installs in `virt-manager` or `virt-viewer`.
+This creates:
 
-After first boot inside each guest, set hostnames:
+- libvirt network `rhcsa-lab`
+- `servera` and `serverb`
+- disk images under `/var/lib/libvirt/images/rhcsa/`
+
+### 2. Install RHEL 10 manually in both guests
+
+Use `virt-manager`.
+
+Recommended installer choices:
+
+- `servera`
+  - Minimal Install
+  - install to `vda` only
+- `serverb`
+  - Minimal Install
+  - install to `vda` only
+  - leave `vdb` / `vdc` / `vdd` / `vde` unselected
+
+### 3. Configure the guests
+
+The validated flow used manual guest configuration rather than the repo bootstrap scripts.
+
+#### ServerA (validated role)
+
+- mount the attached ISO locally
+- create temporary local `dnf` repo definitions from the ISO
+- install `httpd`, `nfs-utils`, `chrony`, `firewalld`
+- set hostname and static IP
+- mount the ISO under `/mnt/rheliso`
+- bind-mount it under `/var/www/html/rhel10`
+- export `/srv/nfs/share`
+- configure chrony as local source
+- open firewall services for HTTP/NFS/NTP
+
+#### ServerB (validated role)
+
+- temporarily mount the attached ISO and use it for initial `dnf`
+- set hostname and static IP
+- install `chrony`, `nfs-utils`, and `autofs`
+- configure HTTP repos pointing to `servera`
+- verify NFS and repo access to `servera`
+
+See `docs/runbook.md` for the full step-by-step sequence.
+
+---
+
+## Day-to-day usage
+
+Start the lab:
 
 ```bash
-sudo hostnamectl set-hostname vm1   # on vm1
-sudo hostnamectl set-hostname vm2   # on vm2
+./scripts/rhcsa-up.sh
 ```
 
-Optional but recommended for nicer host-side visibility:
+Check state:
 
 ```bash
-sudo dnf -y install qemu-guest-agent
-sudo systemctl enable --now qemu-guest-agent
+./scripts/rhcsa-status.sh
+```
+
+Shut it down:
+
+```bash
+./scripts/rhcsa-down.sh
+```
+
+Capture fresh clean baselines:
+
+```bash
+./scripts/rhcsa-capture-baselines.sh
+```
+
+Reset to clean state:
+
+```bash
+./scripts/rhcsa-reset-to-clean.sh
+```
+
+Destroy everything:
+
+```bash
+./scripts/rhcsa-destroy-vms.sh
 ```
 
 ---
 
-## One-time: host SSH convenience
+## Validated reset model
 
-On the host, add `~/.ssh/config` entries (example):
+The following flow was validated:
 
-```sshconfig
-Host vm1
-  HostName 192.168.122.31
-  User student1
-  IdentityFile ~/.ssh/id_ed25519
-  IdentitiesOnly yes
+1. build both guests
+2. configure `servera` and `serverb`
+3. capture clean baselines
+4. introduce guest-side drift on `serverb`
+5. run `rhcsa-reset-to-clean.sh`
+6. confirm the drift is gone and the disk state is restored
 
-Host vm2
-  HostName 192.168.122.66
-  User student1
-  IdentityFile ~/.ssh/id_ed25519
-  IdentitiesOnly yes
-```
-
-Then test:
-
-```bash
-ssh vm1 'hostname && whoami'
-ssh vm2 'hostname && whoami'
-```
+This gives a reproducible exam-style reset path without relying on libvirt snapshots.
 
 ---
 
-## One-time: create golden baselines for deterministic reset
+## Notes and gotchas
 
-When both VMs are in your desired clean state:
-
-```bash
-POOL=/var/lib/libvirt/images/rhcsa
-
-sudo virsh destroy vm1 2>/dev/null || true
-sudo virsh destroy vm2 2>/dev/null || true
-
-sudo cp -f "$POOL/vm1.qcow2" "$POOL/vm1.base.qcow2"
-sudo cp -f "$POOL/vm2.qcow2" "$POOL/vm2.base.qcow2"
-
-sudo chown root:libvirt "$POOL/vm1.base.qcow2" "$POOL/vm2.base.qcow2"
-sudo chmod 0660 "$POOL/vm1.base.qcow2" "$POOL/vm2.base.qcow2"
-
-sudo virsh start vm1
-sudo virsh start vm2
-```
-
-From here on, `rhcsa-reset-to-clean.sh` resets by copying baseline → active.
+- A `403 Forbidden` response from `curl -I http://192.168.56.10/` is acceptable. It proves Apache is reachable; directory listing of `/` is intentionally not the real repo validation check.
+- Use `dnf repolist` and `dnf makecache` on `serverb` to validate repo access.
+- `showmount` requires `nfs-utils` on the client.
+- If the guest sees `/dev/sr0` but it cannot be mounted, confirm the VM CD tray actually has the ISO inserted.
+- If `qemu-guest-agent` warns about a missing virtio port, that does not block lab functionality; it only limits some host-side introspection.
+- `virsh domifaddr` may only show `serverb` if guest agent / DHCP reporting is incomplete on `servera`. The lab can still be healthy.
 
 ---
 
-## Notes / gotchas
+## Next recommended follow-up work
 
-- UEFI/pflash guests make libvirt internal snapshots unusable. Avoid `snapshot-revert`.
-- `qemu-img info` will fail with lock errors while the VM is running unless you use `qemu-img info -U`.
-- `virbr0` can show `NO-CARRIER` when no VMs are attached; it should become `UP` once VM vnet interfaces exist.
-- `virsh domifaddr` is best with `qemu-guest-agent` installed in guests.
-
-See `docs/runbook.md` for the full runbook + troubleshooting.
+- validate and wire in `bootstrap-servera.sh` and `bootstrap-serverb.sh`
+- validate `rhcsa-tmux.sh` and `rhcsa.sh`
+- optionally add a README section with sample RHCSA practice tasks
