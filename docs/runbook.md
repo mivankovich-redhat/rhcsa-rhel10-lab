@@ -1,76 +1,66 @@
-# RHCSA RHEL 10 Lab Runbook (Ubuntu + KVM/libvirt NAT)
+# RHCSA RHEL 10 Lab Runbook (Ubuntu + KVM/libvirt, two-node exam-style layout)
 
-This runbook documents the RHCSA RHEL10 two-VM lab environment:
+This runbook documents the validated RHCSA RHEL 10 lab environment built on an Ubuntu host using KVM/libvirt.
 
-- Host: Ubuntu (libvirt system daemon)
-- Network: libvirt NAT network `default` (bridge `virbr0`, subnet `192.168.122.0/24`)
-- Guests:
-  - `vm1` → `192.168.122.31`
-  - `vm2` → `192.168.122.66`
+Validated topology:
 
-Reset model:
+- `servera.lab.local` → `192.168.56.10`
+  - infrastructure node
+  - local HTTP package repo
+  - NFS server
+  - chrony source
+- `serverb.lab.local` → `192.168.56.20`
+  - practice node
+  - main RHCSA storage / SELinux / firewall / systemd target
 
-- Maintain golden baselines:
+Validated lab network:
 
-  - `/var/lib/libvirt/images/rhcsa/vm1.base.qcow2`
-  - `/var/lib/libvirt/images/rhcsa/vm2.base.qcow2`
-- Reset by copying baseline → active qcow2 and restarting VMs (UEFI-safe, avoids snapshot-revert issues).
+- libvirt network: `rhcsa-lab`
+- bridge: `virbr-rhcsa`
+- subnet: `192.168.56.0/24`
+
+Reset strategy:
+
+- active disks under `/var/lib/libvirt/images/rhcsa/`
+- clean baselines as `*.base.qcow2`
+- reset restores baseline → active disk and restarts the VMs
+
+This avoids the UEFI/pflash snapshot-revert problems that often show up with libvirt snapshots.
 
 ---
 
-## 0) Source of truth and preferred entry point
+## 1. Source of truth
 
-Run all lab scripts from the repo root:
+Run all commands from the repo root:
 
 ```bash
 cd ~/<REPO_ROOT>
 ```
 
-Preferred entry point:
+Use the repo copies of the scripts under `./scripts/`.
 
-```bash
-TMUX_SESSION=rhcsa ./scripts/rhcsa.sh
-```
+Validated host-side scripts:
 
-That driver:
+- `rhcsa-env.sh`
+- `rhcsa-create-vms.sh`
+- `rhcsa-up.sh`
+- `rhcsa-down.sh`
+- `rhcsa-status.sh`
+- `rhcsa-capture-baselines.sh`
+- `rhcsa-reset-to-clean.sh`
 
-- brings the lab up
-- prints status in the host pane
-- opens tmux
-- connects panes for `vm1` and `vm2`
+Not part of the final validated path in this repo state:
 
-Simpler helper flow:
-
-```bash
-./scripts/rhcsa-up.sh
-./scripts/rhcsa-status.sh
-./scripts/rhcsa-tmux.sh
-```
-
-Older duplicates under `~/scripts` should be considered legacy copies unless you intentionally keep them synchronized.
+- `bootstrap-servera.sh`
+- `bootstrap-serverb.sh`
+- `rhcsa-tmux.sh`
+- `rhcsa.sh`
 
 ---
 
-## 1) Quick health check
+## 2. Host prerequisites
 
-```bash
-./scripts/rhcsa-status.sh
-```
-
-Expected:
-
-- `libvirtd` active
-- `default` network active + autostart
-- `virbr0` exists
-- VMs either `running` or `shut off`
-- disk paths are `vm1.qcow2`, `vm2.qcow2` (not `*.clean` overlays)
-- `SUMMARY: PASS`
-
----
-
-## 2) Host prerequisites
-
-Install packages:
+Install host packages:
 
 ```bash
 sudo apt update
@@ -79,43 +69,20 @@ sudo apt install -y \
   virt-manager virt-viewer qemu-utils tmux
 ```
 
-Enable libvirtd:
+Enable libvirt:
 
 ```bash
 sudo systemctl enable --now libvirtd
 sudo virsh --connect qemu:///system uri
 ```
 
----
+Recommended ISO location:
 
-## 3) Network: libvirt NAT default
-
-Confirm:
-
-```bash
-sudo virsh net-info default
-sudo virsh net-dumpxml default | sed -n '1,120p'
-ip -br a | grep virbr0 || true
+```text
+/var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso
 ```
 
-Bring bridge link up (if needed):
-
-```bash
-sudo ip link set virbr0 up || true
-```
-
-Notes:
-
-- `virbr0` can show `NO-CARRIER` when no VMs are attached.
-- Once VMs start, vnet interfaces appear and the bridge typically shows `UP`.
-
----
-
-## 4) RHEL 10 ISO and disk provisioning
-
-This repo assumes you already have access to a RHEL 10 DVD ISO through your Red Hat subscription.
-
-Recommended host location:
+Host prep:
 
 ```bash
 sudo mkdir -p /var/lib/libvirt/images/iso
@@ -125,157 +92,366 @@ sudo chmod -R 0775 /var/lib/libvirt/images/iso
 sudo chmod 0664 /var/lib/libvirt/images/iso/*.iso
 ```
 
-By default, `scripts/rhcsa-create-vms.sh` expects:
-
-```text
-/var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso
-```
-
-Override if needed:
-
-```bash
-ISO=/path/to/rhel-10.1-x86_64-dvd.iso ./scripts/rhcsa-create-vms.sh
-```
-
-The script creates the VM qcow2 disks automatically under:
-
-```text
-/var/lib/libvirt/images/rhcsa/
-```
-
-No manual `qemu-img create` step is normally required.
-
 ---
 
-## 5) Create VMs (one-time)
+## 3. Create the lab
 
 ```bash
 chmod +x scripts/*.sh
 ./scripts/rhcsa-create-vms.sh
 ```
 
-This script:
+Expected outcome:
 
-- creates disks under `/var/lib/libvirt/images/rhcsa/`
-- creates vm1 + vm2 on `default`
-- reserves DHCP entries for stable IPs (by MAC)
+- libvirt network `rhcsa-lab` exists and autostarts
+- `servera` exists
+- `serverb` exists
+- disk images are created under `/var/lib/libvirt/images/rhcsa/`
 
-Complete OS installs via `virt-manager` or `virt-viewer`.
-
----
-
-## 6) Guest post-install checklist (both VMs)
-
-### 6.1 Hostnames
+Check status:
 
 ```bash
-sudo hostnamectl set-hostname vm1   # on vm1
-sudo hostnamectl set-hostname vm2   # on vm2
-```
-
-### 6.2 qemu-guest-agent (recommended)
-
-Improves `virsh domifaddr` and some VM introspection:
-
-```bash
-sudo dnf -y install qemu-guest-agent
-sudo systemctl enable --now qemu-guest-agent
-```
-
-### 6.3 SSH access
-
-From host:
-
-- either use IPs directly
-- or set `~/.ssh/config` aliases (recommended)
-
-Example host `~/.ssh/config`:
-
-```sshconfig
-Host vm1
-  HostName 192.168.122.31
-  User student1
-  IdentityFile ~/.ssh/id_ed25519
-  IdentitiesOnly yes
-
-Host vm2
-  HostName 192.168.122.66
-  User student1
-  IdentityFile ~/.ssh/id_ed25519
-  IdentitiesOnly yes
-```
-
-Validate:
-
-```bash
-ssh vm1 'hostname && whoami'
-ssh vm2 'hostname && whoami'
+./scripts/rhcsa-status.sh
 ```
 
 ---
 
-## 7) Baseline strategy (critical)
+## 4. Guest install guidance
 
-### Why not libvirt snapshots?
+### ServerA
 
-UEFI/pflash guests often break internal snapshots. External disk snapshots can wedge the VM into `.clean` overlay states that are hard to revert cleanly.
+Recommended installer selections:
 
-### Baseline model (this lab)
+- Minimal Install
+- hostname: `servera.lab.local`
+- install to `vda` only
+- automatic partitioning on `vda`
 
-- Treat `vm1.base.qcow2` / `vm2.base.qcow2` as golden images.
-- Reset by copying baseline → active disks.
+### ServerB
 
-### Create or refresh baselines (one-time, when clean is correct)
+Recommended installer selections:
 
-```bash
-POOL=/var/lib/libvirt/images/rhcsa
+- Minimal Install
+- hostname: `serverb.lab.local`
+- install to `vda` only
+- leave `vdb` / `vdc` / `vdd` / `vde` unselected
 
-sudo virsh destroy vm1 2>/dev/null || true
-sudo virsh destroy vm2 2>/dev/null || true
-
-sudo cp -f "$POOL/vm1.qcow2" "$POOL/vm1.base.qcow2"
-sudo cp -f "$POOL/vm2.qcow2" "$POOL/vm2.base.qcow2"
-
-sudo chown root:libvirt "$POOL/vm1.base.qcow2" "$POOL/vm2.base.qcow2"
-sudo chmod 0660 "$POOL/vm1.base.qcow2" "$POOL/vm2.base.qcow2"
-
-sudo virsh start vm1
-sudo virsh start vm2
-```
-
-Tip: only refresh baselines when you intentionally want a new clean point.
+This is critical. The extra disks are for RHCSA storage work and must remain clean after install.
 
 ---
 
-## 8) Day-to-day operations
+## 5. Post-install validated configuration
 
-### Preferred driver
+The final validated flow used manual guest configuration rather than the bootstrap scripts.
+
+### 5.1 Ensure ISO media is actually inserted
+
+If a guest sees a CD-ROM device but cannot mount `/dev/sr0`, check the host-side media assignment.
+
+Example:
 
 ```bash
-TMUX_SESSION=rhcsa ./scripts/rhcsa.sh
+sudo virsh domblklist servera
+sudo virsh change-media servera sda \
+  --insert /var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso \
+  --live --config
 ```
 
-### Simpler helper flow
+Repeat for `serverb` if needed.
+
+---
+
+## 6. ServerA validated configuration
+
+### 6.1 Temporary local ISO repos
+
+Inside `servera` as root:
+
+```bash
+mkdir -p /mnt/rheliso
+mount /dev/sr0 /mnt/rheliso
+
+cat >/etc/yum.repos.d/rhel10-local-iso.repo <<'EOF2'
+[rhel10-local-baseos]
+name=RHEL 10 Local ISO BaseOS
+baseurl=file:///mnt/rheliso/BaseOS
+enabled=1
+gpgcheck=0
+
+[rhel10-local-appstream]
+name=RHEL 10 Local ISO AppStream
+baseurl=file:///mnt/rheliso/AppStream
+enabled=1
+gpgcheck=0
+EOF2
+
+dnf clean all
+dnf repolist
+dnf install -y qemu-guest-agent httpd nfs-utils chrony firewalld
+```
+
+Note: a missing virtio guest-agent port warning is not a functional blocker for the lab.
+
+### 6.2 Hostname, IP, and hosts file
+
+```bash
+hostnamectl set-hostname servera.lab.local
+nmcli con mod "enp1s0" ipv4.method manual ipv4.addresses 192.168.56.10/24 ipv6.method disabled
+nmcli con up "enp1s0"
+
+cat >> /etc/hosts <<'EOF2'
+192.168.56.10 servera.lab.local servera
+192.168.56.20 serverb.lab.local serverb
+192.168.56.30 serverc.lab.local serverc
+EOF2
+```
+
+If the NetworkManager connection name is not `enp1s0`, use the exact name from `nmcli con show`.
+
+### 6.3 HTTP repo, NFS, chrony, firewall
+
+```bash
+systemctl enable --now httpd chronyd nfs-server firewalld
+
+mkdir -p /var/www/html/rhel10
+mount --bind /mnt/rheliso /var/www/html/rhel10
+
+mkdir -p /srv/nfs/share
+echo "RHCSA lab share from servera" > /srv/nfs/share/README.txt
+echo "/srv/nfs/share 192.168.56.0/24(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
+exportfs -rav
+
+printf '\nallow 192.168.56.0/24\nlocal stratum 10\n' >> /etc/chrony.conf
+systemctl restart chronyd
+
+firewall-cmd --add-service=http --permanent
+firewall-cmd --add-service=nfs --permanent
+firewall-cmd --add-service=mountd --permanent
+firewall-cmd --add-service=rpc-bind --permanent
+firewall-cmd --add-service=ntp --permanent
+firewall-cmd --reload
+```
+
+### 6.4 Persist the ISO and bind mount
+
+`/etc/fstab` should contain these lines in this order:
+
+```fstab
+/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0
+/mnt/rheliso /var/www/html/rhel10 none bind 0 0
+```
+
+Then:
+
+```bash
+systemctl daemon-reload
+mount -a
+```
+
+### 6.5 ServerA validation
+
+```bash
+hostnamectl
+ip a
+mount | egrep 'rheliso|rhel10'
+showmount -e localhost
+curl -I http://127.0.0.1/
+systemctl is-active httpd nfs-server chronyd firewalld
+sudo firewall-cmd --list-services
+```
+
+Expected results:
+
+- hostname = `servera.lab.local`
+- IP includes `192.168.56.10/24`
+- NFS export visible
+- Apache responds
+- services active
+- firewall includes `http nfs mountd rpc-bind ntp`
+
+A `403 Forbidden` from Apache root is acceptable; it still proves Apache is reachable.
+
+---
+
+## 7. ServerB validated configuration
+
+### 7.1 Temporary local ISO repos for initial package install
+
+Inside `serverb` as root:
+
+```bash
+mkdir -p /mnt/rheliso
+mount /dev/sr0 /mnt/rheliso
+
+cat >/etc/yum.repos.d/rhel10-local-iso.repo <<'EOF2'
+[rhel10-local-baseos]
+name=RHEL 10 Local ISO BaseOS
+baseurl=file:///mnt/rheliso/BaseOS
+enabled=1
+gpgcheck=0
+
+[rhel10-local-appstream]
+name=RHEL 10 Local ISO AppStream
+baseurl=file:///mnt/rheliso/AppStream
+enabled=1
+gpgcheck=0
+EOF2
+
+dnf clean all
+dnf repolist
+```
+
+### 7.2 Hostname, IP, and hosts file
+
+```bash
+hostnamectl set-hostname serverb.lab.local
+nmcli con mod "enp1s0" ipv4.method manual ipv4.addresses 192.168.56.20/24 ipv6.method disabled
+nmcli con up "enp1s0"
+
+cat >> /etc/hosts <<'EOF2'
+192.168.56.10 servera.lab.local servera
+192.168.56.20 serverb.lab.local serverb
+192.168.56.30 serverc.lab.local serverc
+EOF2
+```
+
+Again, if the NetworkManager connection name differs, use the exact connection name from `nmcli con show`.
+
+### 7.3 Install client packages and chrony config
+
+```bash
+dnf install -y chrony nfs-utils autofs
+printf '\nserver 192.168.56.10 iburst\n' >> /etc/chrony.conf
+systemctl enable --now chronyd
+systemctl restart chronyd
+```
+
+### 7.4 Switch to ServerA HTTP repos
+
+```bash
+cat >/etc/yum.repos.d/lab-http.repo <<'EOF2'
+[lab-baseos]
+name=Lab BaseOS
+baseurl=http://192.168.56.10/rhel10/BaseOS
+enabled=1
+gpgcheck=0
+
+[lab-appstream]
+name=Lab AppStream
+baseurl=http://192.168.56.10/rhel10/AppStream
+enabled=1
+gpgcheck=0
+EOF2
+
+mv /etc/yum.repos.d/rhel10-local-iso.repo /etc/yum.repos.d/rhel10-local-iso.repo.disabled
+dnf clean all
+dnf repolist
+dnf makecache
+```
+
+### 7.5 ServerB validation
+
+```bash
+ping -c 3 servera
+getent hosts servera
+curl -I http://192.168.56.10/
+showmount -e servera
+chronyc sources -v
+lsblk
+dnf repolist
+```
+
+Expected results:
+
+- `servera` resolves and pings
+- HTTP on `servera` is reachable
+- NFS export visible
+- `lsblk` shows `vda`, `vdb`, `vdc`, `vdd`, `vde`
+- `dnf repolist` shows HTTP repos backed by `servera`
+
+---
+
+## 8. Baseline capture
+
+Once both guests are in the desired clean state:
+
+```bash
+./scripts/rhcsa-capture-baselines.sh
+```
+
+This captures:
+
+- `servera-os.base.qcow2`
+- `serverb-os.base.qcow2`
+- `serverb-sdb.base.qcow2`
+- `serverb-sdc.base.qcow2`
+- `serverb-sdd.base.qcow2`
+- `serverb-sde.base.qcow2`
+
+Then verify:
+
+```bash
+./scripts/rhcsa-status.sh
+```
+
+Expected:
+
+- baselines exist for all active disks
+- `SUMMARY: PASS`
+
+---
+
+## 9. Reset-to-clean validation
+
+Validated flow:
+
+1. create a harmless guest-side change on `serverb`
+2. run `./scripts/rhcsa-reset-to-clean.sh`
+3. confirm the drift is gone after reboot
+
+Example drift check that was validated:
+
+- create `/root/reset-test.txt` on `serverb`
+- run reset-to-clean
+- confirm `/root/reset-test.txt` no longer exists
+
+This proves the reset lifecycle is working.
+
+---
+
+## 10. Day-to-day commands
+
+Start the lab:
 
 ```bash
 ./scripts/rhcsa-up.sh
-./scripts/rhcsa-status.sh
-./scripts/rhcsa-tmux.sh
 ```
 
-### Reset to baseline
-
-```bash
-./scripts/rhcsa-reset-to-clean.sh
-```
-
-### Shut down
+Stop the lab:
 
 ```bash
 ./scripts/rhcsa-down.sh
 ```
 
-### Destroy everything (irreversible)
+Full status:
+
+```bash
+./scripts/rhcsa-status.sh
+```
+
+Capture new baselines:
+
+```bash
+./scripts/rhcsa-capture-baselines.sh
+```
+
+Reset to clean:
+
+```bash
+./scripts/rhcsa-reset-to-clean.sh
+```
+
+Destroy the lab:
 
 ```bash
 ./scripts/rhcsa-destroy-vms.sh
@@ -283,127 +459,43 @@ TMUX_SESSION=rhcsa ./scripts/rhcsa.sh
 
 ---
 
-## 9) Optional: passwordless sudo for lab automation
+## 11. Troubleshooting
 
-This step is optional. It reduces repeated sudo prompts for host-side lab automation, but it grants passwordless access to a limited set of libvirt/network management commands. Review it before enabling.
+### Apache root returns 403
 
-Create `/etc/sudoers.d/rhcsa-lab`:
+`curl -I http://192.168.56.10/` may return `403 Forbidden`.
+That is acceptable and still proves Apache is reachable.
+Use `dnf repolist` / `dnf makecache` on `serverb` as the real repo validation.
 
-```bash
-sudo tee /etc/sudoers.d/rhcsa-lab >/dev/null <<'EOF'
-# Passwordless sudo for RHCSA libvirt lab automation
-# Replace <your-username> with your local Linux username.
+### `showmount: command not found`
 
-User_Alias RHCSAUSER = <your-username>
-
-Cmnd_Alias RHCSA_SYSTEMCTL = \
-  /bin/systemctl enable --now libvirtd, \
-  /bin/systemctl restart libvirtd, \
-  /bin/systemctl is-active --quiet libvirtd
-
-Cmnd_Alias RHCSA_VIRSH = /usr/bin/virsh *, /bin/virsh *
-
-Cmnd_Alias RHCSA_IP = \
-  /usr/sbin/ip link set virbr0 up, \
-  /usr/sbin/ip link show virbr0, \
-  /usr/sbin/ip -br a
-
-RHCSAUSER ALL=(root) NOPASSWD: RHCSA_SYSTEMCTL, RHCSA_VIRSH, RHCSA_IP
-EOF
-
-sudo chmod 0440 /etc/sudoers.d/rhcsa-lab
-sudo visudo -cf /etc/sudoers.d/rhcsa-lab
-```
-
-Validate:
+Install `nfs-utils` on the client:
 
 ```bash
-sudo -n true && echo "NOPASSWD works"
-sudo -n virsh list --all
-sudo -n systemctl is-active --quiet libvirtd && echo "libvirtd active"
+dnf install -y nfs-utils
 ```
+
+### `/dev/sr0` exists but mount fails
+
+The guest CD tray may be empty. Verify and insert ISO from the host with `virsh change-media`.
+
+### Guest agent warning about missing virtio port
+
+This does not block core lab functionality. It only limits some host-side introspection like address reporting.
+
+### `firewall-cmd --list-services` fails as student user
+
+Run it with `sudo`.
+
+### `servera` address may not show in host-side status
+
+If guest-agent or DHCP reporting is incomplete, `rhcsa-status.sh` may still pass even if `servera` does not show an address. Validate `servera` from inside the guests and by service checks.
 
 ---
 
-## 10) Troubleshooting
+## 12. Recommended next improvements
 
-### 10.1 `virbr0` shows DOWN
-
-If `virbr0` is `DOWN` before VMs start, that may be normal. If it stays down after starting VMs:
-
-```bash
-sudo ip link set virbr0 up
-sudo virsh net-destroy default
-sudo virsh net-start default
-ip -br a | grep virbr0
-```
-
-### 10.2 `virsh domifaddr` says domain is not running
-
-Start the VMs:
-
-```bash
-sudo virsh start vm1
-sudo virsh start vm2
-```
-
-### 10.3 `virsh domifaddr` empty / unreliable
-
-Install guest agent in the VM:
-
-```bash
-sudo dnf -y install qemu-guest-agent
-sudo systemctl enable --now qemu-guest-agent
-```
-
-Fallback on host:
-
-```bash
-sudo virsh net-dhcp-leases default
-```
-
-### 10.4 `qemu-img info` fails with lock errors
-
-That’s expected when a VM holds a write lock. Use `-U`:
-
-```bash
-sudo qemu-img info -U /var/lib/libvirt/images/rhcsa/vm1.qcow2
-```
-
-### 10.5 SSH: No route to host
-
-Usually means VMs not up yet or `default` network/bridge not ready:
-
-```bash
-./scripts/rhcsa-status.sh
-./scripts/rhcsa-up.sh
-```
-
----
-
-## 11) Cockpit notes (practice-friendly)
-
-Enable cockpit:
-
-```bash
-sudo dnf -y install cockpit
-sudo systemctl enable --now cockpit.socket
-```
-
-Then access from host:
-
-- `https://vm1:9090/` or `https://192.168.122.31:9090/`
-- `https://vm2:9090/` or `https://192.168.122.66:9090/`
-
----
-
-## 12) Reference: scripts
-
-- `scripts/rhcsa-up.sh` — start libvirt/network + VMs
-- `scripts/rhcsa-down.sh` — shut down VMs
-- `scripts/rhcsa-reset-to-clean.sh` — baseline disk-copy reset (UEFI-safe)
-- `scripts/rhcsa-status.sh` — health/status report
-- `scripts/rhcsa.sh` — preferred tmux driver
-- `scripts/rhcsa-tmux.sh` — tmux helper (host/vm1/vm2 panes)
-- `scripts/rhcsa-create-vms.sh` — create VMs + DHCP reservations
-- `scripts/rhcsa-destroy-vms.sh` — destroy VM defs + disks
+- validate and integrate `bootstrap-servera.sh`
+- validate and integrate `bootstrap-serverb.sh`
+- validate `rhcsa-tmux.sh` and `rhcsa.sh`
+- optionally add sample RHCSA task bundles for repeated practice
