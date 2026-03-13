@@ -27,6 +27,10 @@ Reset strategy:
 
 This avoids the UEFI/pflash snapshot-revert problems that often show up with libvirt snapshots.
 
+Validated checkpoint tag:
+
+- `validated-two-node-lab-v1`
+
 ---
 
 ## 1. Source of truth
@@ -39,7 +43,7 @@ cd ~/<REPO_ROOT>
 
 Use the repo copies of the scripts under `./scripts/`.
 
-Validated host-side scripts:
+Validated scripts in the current repo state:
 
 - `rhcsa-env.sh`
 - `rhcsa-create-vms.sh`
@@ -48,13 +52,14 @@ Validated host-side scripts:
 - `rhcsa-status.sh`
 - `rhcsa-capture-baselines.sh`
 - `rhcsa-reset-to-clean.sh`
+- `rhcsa-destroy-vms.sh`
+- `rhcsa-tmux.sh`
+- `rhcsa.sh`
 
 Not part of the final validated path in this repo state:
 
 - `bootstrap-servera.sh`
 - `bootstrap-serverb.sh`
-- `rhcsa-tmux.sh`
-- `rhcsa.sh`
 
 ---
 
@@ -371,7 +376,49 @@ Expected results:
 
 ---
 
-## 8. Baseline capture
+## 8. Host SSH setup for tmux helpers
+
+The validated tmux helpers use host-side SSH aliases.
+
+Add these to `~/.ssh/config` on the Ubuntu host:
+
+```sshconfig
+Host servera-lab
+  HostName 192.168.56.10
+  User student
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+  PreferredAuthentications publickey
+  PasswordAuthentication no
+  StrictHostKeyChecking accept-new
+
+Host serverb-lab
+  HostName 192.168.56.20
+  User student
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+  PreferredAuthentications publickey
+  PasswordAuthentication no
+  StrictHostKeyChecking accept-new
+```
+
+Then copy the key into the guests:
+
+```bash
+ssh-copy-id -i ~/.ssh/id_ed25519.pub student@192.168.56.10
+ssh-copy-id -i ~/.ssh/id_ed25519.pub student@192.168.56.20
+```
+
+Validate:
+
+```bash
+ssh servera-lab
+ssh serverb-lab
+```
+
+---
+
+## 9. Baseline capture
 
 Once both guests are in the desired clean state:
 
@@ -401,7 +448,7 @@ Expected:
 
 ---
 
-## 9. Reset-to-clean validation
+## 10. Reset-to-clean validation
 
 Validated flow:
 
@@ -419,7 +466,7 @@ This proves the reset lifecycle is working.
 
 ---
 
-## 10. Day-to-day commands
+## 11. Day-to-day commands
 
 Start the lab:
 
@@ -457,9 +504,16 @@ Destroy the lab:
 ./scripts/rhcsa-destroy-vms.sh
 ```
 
+Open the validated tmux helpers:
+
+```bash
+./scripts/rhcsa-tmux.sh
+TMUX_SESSION=rhcsa-followup ./scripts/rhcsa.sh
+```
+
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 ### Apache root returns 403
 
@@ -491,11 +545,14 @@ Run it with `sudo`.
 
 If guest-agent or DHCP reporting is incomplete, `rhcsa-status.sh` may still pass even if `servera` does not show an address. Validate `servera` from inside the guests and by service checks.
 
+### `rhcsa.sh` prompts for sudo before tmux opens
+
+That can be expected depending on the host sudo policy. The validated wrapper brings the lab up before creating the tmux session.
+
 ---
 
-## 12. Recommended next improvements
+## 13. Recommended next improvements
 
 - validate and integrate `bootstrap-servera.sh`
 - validate and integrate `bootstrap-serverb.sh`
-- validate `rhcsa-tmux.sh` and `rhcsa.sh`
 - optionally add sample RHCSA task bundles for repeated practice
