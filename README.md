@@ -69,7 +69,8 @@ Those bootstrap helpers should be validated separately against a fresh OS-only g
   - `rhcsa-tmux.sh` — simple tmux helper that opens host + `servera` + `serverb`
   - `rhcsa.sh` — validated wrapper that brings the lab up, shows status, and opens the tmux layout
 - `docs/`
-  - `runbook.md` — detailed build, validation, and troubleshooting notes
+  - `runbooks/runbook.md` — detailed build, validation, and troubleshooting notes for the validated lab baseline
+  - `exams/exam1/` — RHCSA-style task practice documents such as `task_01_reset_root_password.md` and `task_02_configure_local_dnf_repo.md`
 
 ---
 
@@ -79,9 +80,7 @@ Install required packages on Ubuntu:
 
 ```bash
 sudo apt update
-sudo apt install -y \
-  qemu-kvm libvirt-daemon-system libvirt-clients virtinst \
-  virt-manager virt-viewer qemu-utils tmux
+sudo apt install -y   qemu-kvm libvirt-daemon-system libvirt-clients virtinst   virt-manager virt-viewer qemu-utils tmux
 ```
 
 Enable libvirt:
@@ -150,6 +149,30 @@ During OS installation on `serverb`, install to `vda` only and leave `vdb` / `vd
 
 ---
 
+## Baseline build vs exam task docs
+
+This repo now separates two related but different kinds of documentation:
+
+- `docs/runbooks/runbook.md`
+  - the validated **lab baseline** build and service configuration
+  - optimized for reproducible bring-up, stable reset behavior, and deterministic validation
+- `docs/exams/exam1/task_*.md`
+  - **exam-practice task workflows**
+  - optimized for RHCSA-style repetition and muscle memory
+
+These may intentionally use different mount points, repo filenames, or validation patterns.
+
+Examples:
+
+- the validated baseline runbook uses `/mnt/rheliso` and `rhel10-local-iso.repo` during initial build
+- the Task 2 exam-practice doc uses `/mnt` and `/etc/yum.repos.d/local.repo` for local-media drills
+- the validated baseline runbook uses `http://192.168.56.10/rhel10/...` for deterministic HTTP repo configuration on `serverb`
+- the Task 2 exam-practice doc may use `servera` by hostname for repo-consumer drills to reinforce name resolution and service access
+
+Use the runbook to build and maintain the lab. Use the task docs to practice RHCSA objectives.
+
+---
+
 ## One-time build flow
 
 ### 1. Create the lab
@@ -203,7 +226,12 @@ The validated flow used manual guest configuration rather than the repo bootstra
 - configure HTTP repos pointing to `servera`
 - verify NFS and repo access to `servera`
 
-See `docs/runbook.md` for the full step-by-step sequence.
+See `docs/runbooks/runbook.md` for the full step-by-step validated baseline sequence.
+
+For RHCSA-style practice tasks, see:
+
+- `docs/exams/exam1/task_01_reset_root_password.md`
+- `docs/exams/exam1/task_02_configure_local_dnf_repo.md`
 
 ---
 
@@ -318,4 +346,4 @@ This gives a reproducible exam-style reset path without relying on libvirt snaps
 
 - validate and integrate `bootstrap-servera.sh`
 - validate and integrate `bootstrap-serverb.sh`
-- optionally add a README section with sample RHCSA practice tasks
+- continue adding RHCSA task bundles under `docs/exams/`

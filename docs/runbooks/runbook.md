@@ -63,15 +63,35 @@ Not part of the final validated path in this repo state:
 
 ---
 
-## 2. Host prerequisites
+## 2. Baseline build vs exam practice docs
+
+This runbook is the source for the validated **lab baseline** build and service configuration.
+
+The files under `docs/exams/` are different on purpose:
+
+- this runbook optimizes for reproducible bring-up, stable reset behavior, and deterministic validation
+- the exam task docs optimize for RHCSA-style repetition and muscle memory
+
+That means some commands and file names differ between the runbook and the task docs without being contradictory.
+
+Examples:
+
+- this runbook uses `/mnt/rheliso` and `/etc/yum.repos.d/rhel10-local-iso.repo` for baseline guest bring-up
+- `docs/exams/exam1/task_02_configure_local_dnf_repo.md` uses `/mnt` and `/etc/yum.repos.d/local.repo` for the local-media practice drill
+- this runbook uses `http://192.168.56.10/rhel10/...` on `serverb` for deterministic baseline repo configuration
+- the Task 2 practice doc may use `servera` by hostname to reinforce host resolution and service-consumer validation
+
+Use this runbook to build and maintain the lab baseline. Use the task docs to rehearse exam workflows.
+
+---
+
+## 3. Host prerequisites
 
 Install host packages:
 
 ```bash
 sudo apt update
-sudo apt install -y \
-  qemu-kvm libvirt-daemon-system libvirt-clients virtinst \
-  virt-manager virt-viewer qemu-utils tmux
+sudo apt install -y   qemu-kvm libvirt-daemon-system libvirt-clients virtinst   virt-manager virt-viewer qemu-utils tmux
 ```
 
 Enable libvirt:
@@ -99,7 +119,7 @@ sudo chmod 0664 /var/lib/libvirt/images/iso/*.iso
 
 ---
 
-## 3. Create the lab
+## 4. Create the lab
 
 ```bash
 chmod +x scripts/*.sh
@@ -121,7 +141,7 @@ Check status:
 
 ---
 
-## 4. Guest install guidance
+## 5. Guest install guidance
 
 ### ServerA
 
@@ -145,11 +165,11 @@ This is critical. The extra disks are for RHCSA storage work and must remain cle
 
 ---
 
-## 5. Post-install validated configuration
+## 6. Post-install validated configuration
 
 The final validated flow used manual guest configuration rather than the bootstrap scripts.
 
-### 5.1 Ensure ISO media is actually inserted
+### 6.1 Ensure ISO media is actually inserted
 
 If a guest sees a CD-ROM device but cannot mount `/dev/sr0`, check the host-side media assignment.
 
@@ -157,18 +177,16 @@ Example:
 
 ```bash
 sudo virsh domblklist servera
-sudo virsh change-media servera sda \
-  --insert /var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso \
-  --live --config
+sudo virsh change-media servera sda   --insert /var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso   --live --config
 ```
 
 Repeat for `serverb` if needed.
 
 ---
 
-## 6. ServerA validated configuration
+## 7. ServerA validated configuration
 
-### 6.1 Temporary local ISO repos
+### 7.1 Temporary local ISO repos
 
 Inside `servera` as root:
 
@@ -197,7 +215,7 @@ dnf install -y qemu-guest-agent httpd nfs-utils chrony firewalld
 
 Note: a missing virtio guest-agent port warning is not a functional blocker for the lab.
 
-### 6.2 Hostname, IP, and hosts file
+### 7.2 Hostname, IP, and hosts file
 
 ```bash
 hostnamectl set-hostname servera.lab.local
@@ -213,7 +231,7 @@ EOF2
 
 If the NetworkManager connection name is not `enp1s0`, use the exact name from `nmcli con show`.
 
-### 6.3 HTTP repo, NFS, chrony, firewall
+### 7.3 HTTP repo, NFS, chrony, firewall
 
 ```bash
 systemctl enable --now httpd chronyd nfs-server firewalld
@@ -226,7 +244,10 @@ echo "RHCSA lab share from servera" > /srv/nfs/share/README.txt
 echo "/srv/nfs/share 192.168.56.0/24(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
 exportfs -rav
 
-printf '\nallow 192.168.56.0/24\nlocal stratum 10\n' >> /etc/chrony.conf
+printf '
+allow 192.168.56.0/24
+local stratum 10
+' >> /etc/chrony.conf
 systemctl restart chronyd
 
 firewall-cmd --add-service=http --permanent
@@ -237,7 +258,7 @@ firewall-cmd --add-service=ntp --permanent
 firewall-cmd --reload
 ```
 
-### 6.4 Persist the ISO and bind mount
+### 7.4 Persist the ISO and bind mount
 
 `/etc/fstab` should contain these lines in this order:
 
@@ -253,7 +274,7 @@ systemctl daemon-reload
 mount -a
 ```
 
-### 6.5 ServerA validation
+### 7.5 ServerA validation
 
 ```bash
 hostnamectl
@@ -278,9 +299,9 @@ A `403 Forbidden` from Apache root is acceptable; it still proves Apache is reac
 
 ---
 
-## 7. ServerB validated configuration
+## 8. ServerB validated configuration
 
-### 7.1 Temporary local ISO repos for initial package install
+### 8.1 Temporary local ISO repos for initial package install
 
 Inside `serverb` as root:
 
@@ -306,7 +327,7 @@ dnf clean all
 dnf repolist
 ```
 
-### 7.2 Hostname, IP, and hosts file
+### 8.2 Hostname, IP, and hosts file
 
 ```bash
 hostnamectl set-hostname serverb.lab.local
@@ -322,16 +343,20 @@ EOF2
 
 Again, if the NetworkManager connection name differs, use the exact connection name from `nmcli con show`.
 
-### 7.3 Install client packages and chrony config
+### 8.3 Install client packages and chrony config
 
 ```bash
 dnf install -y chrony nfs-utils autofs
-printf '\nserver 192.168.56.10 iburst\n' >> /etc/chrony.conf
+printf '
+server 192.168.56.10 iburst
+' >> /etc/chrony.conf
 systemctl enable --now chronyd
 systemctl restart chronyd
 ```
 
-### 7.4 Switch to ServerA HTTP repos
+### 8.4 Switch to ServerA HTTP repos
+
+For the validated baseline, use the static IP for deterministic configuration:
 
 ```bash
 cat >/etc/yum.repos.d/lab-http.repo <<'EOF2'
@@ -354,7 +379,9 @@ dnf repolist
 dnf makecache
 ```
 
-### 7.5 ServerB validation
+If you want hostname-based RHCSA practice instead, use the exam task docs under `docs/exams/exam1/`.
+
+### 8.5 ServerB validation
 
 ```bash
 ping -c 3 servera
@@ -376,7 +403,7 @@ Expected results:
 
 ---
 
-## 8. Host SSH setup for tmux helpers
+## 9. Host SSH setup for tmux helpers
 
 The validated tmux helpers use host-side SSH aliases.
 
@@ -418,7 +445,7 @@ ssh serverb-lab
 
 ---
 
-## 9. Baseline capture
+## 10. Baseline capture
 
 Once both guests are in the desired clean state:
 
@@ -448,7 +475,7 @@ Expected:
 
 ---
 
-## 10. Reset-to-clean validation
+## 11. Reset-to-clean validation
 
 Validated flow:
 
@@ -466,7 +493,7 @@ This proves the reset lifecycle is working.
 
 ---
 
-## 11. Day-to-day commands
+## 12. Day-to-day commands
 
 Start the lab:
 
@@ -513,7 +540,7 @@ TMUX_SESSION=rhcsa-followup ./scripts/rhcsa.sh
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 ### Apache root returns 403
 
@@ -551,8 +578,8 @@ That can be expected depending on the host sudo policy. The validated wrapper br
 
 ---
 
-## 13. Recommended next improvements
+## 14. Recommended next improvements
 
 - validate and integrate `bootstrap-servera.sh`
 - validate and integrate `bootstrap-serverb.sh`
-- optionally add sample RHCSA task bundles for repeated practice
+- continue expanding RHCSA task bundles under `docs/exams/`
