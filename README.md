@@ -27,7 +27,7 @@ The lab uses a deterministic baseline/reset model instead of libvirt snapshot-re
 - clean baselines are captured as `*.base.qcow2`
 - reset restores baseline → active disk and restarts the VMs
 
-This workflow has been validated end to end.
+This workflow has been validated end to end and tagged as `validated-two-node-lab-v1`.
 
 ---
 
@@ -35,23 +35,23 @@ This workflow has been validated end to end.
 
 Tested and validated in this repo:
 
+- `scripts/rhcsa-env.sh`
 - `scripts/rhcsa-create-vms.sh`
 - `scripts/rhcsa-up.sh`
 - `scripts/rhcsa-down.sh`
 - `scripts/rhcsa-reset-to-clean.sh`
 - `scripts/rhcsa-status.sh`
-- `scripts/rhcsa-destroy-vms.sh` (old lab teardown path validated; new topology lifecycle validated through create/reset/up/down)
+- `scripts/rhcsa-destroy-vms.sh` (new topology lifecycle validated through create/reset/up/down; old lab teardown path also exercised manually)
 - `scripts/rhcsa-capture-baselines.sh`
-- `scripts/rhcsa-env.sh` as a dependency of the validated host-side scripts
+- `scripts/rhcsa-tmux.sh`
+- `scripts/rhcsa.sh`
 
 Not part of the final validated workflow in this repo state:
 
 - `scripts/bootstrap-servera.sh`
 - `scripts/bootstrap-serverb.sh`
-- `scripts/rhcsa-tmux.sh`
-- `scripts/rhcsa.sh`
 
-Those helpers can be validated in a follow-up change.
+Those bootstrap helpers should be validated separately against a fresh OS-only guest state before being merged.
 
 ---
 
@@ -66,6 +66,8 @@ Those helpers can be validated in a follow-up change.
   - `rhcsa-capture-baselines.sh` — create clean baseline copies of all active disks
   - `rhcsa-reset-to-clean.sh` — restore active disks from baseline copies
   - `rhcsa-destroy-vms.sh` — irreversible destroy of the lab domains and disks
+  - `rhcsa-tmux.sh` — simple tmux helper that opens host + `servera` + `serverb`
+  - `rhcsa.sh` — validated wrapper that brings the lab up, shows status, and opens the tmux layout
 - `docs/`
   - `runbook.md` — detailed build, validation, and troubleshooting notes
 
@@ -205,6 +207,39 @@ See `docs/runbook.md` for the full step-by-step sequence.
 
 ---
 
+## SSH aliases for tmux helpers
+
+The validated tmux helpers assume host-side SSH aliases for the two lab guests. Add these to `~/.ssh/config` on the Ubuntu host:
+
+```sshconfig
+Host servera-lab
+  HostName 192.168.56.10
+  User student
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+  PreferredAuthentications publickey
+  PasswordAuthentication no
+  StrictHostKeyChecking accept-new
+
+Host serverb-lab
+  HostName 192.168.56.20
+  User student
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+  PreferredAuthentications publickey
+  PasswordAuthentication no
+  StrictHostKeyChecking accept-new
+```
+
+Then copy the key into the guests:
+
+```bash
+ssh-copy-id -i ~/.ssh/id_ed25519.pub student@192.168.56.10
+ssh-copy-id -i ~/.ssh/id_ed25519.pub student@192.168.56.20
+```
+
+---
+
 ## Day-to-day usage
 
 Start the lab:
@@ -243,6 +278,13 @@ Destroy everything:
 ./scripts/rhcsa-destroy-vms.sh
 ```
 
+Open the validated tmux helpers:
+
+```bash
+./scripts/rhcsa-tmux.sh
+TMUX_SESSION=rhcsa-followup ./scripts/rhcsa.sh
+```
+
 ---
 
 ## Validated reset model
@@ -268,11 +310,12 @@ This gives a reproducible exam-style reset path without relying on libvirt snaps
 - If the guest sees `/dev/sr0` but it cannot be mounted, confirm the VM CD tray actually has the ISO inserted.
 - If `qemu-guest-agent` warns about a missing virtio port, that does not block lab functionality; it only limits some host-side introspection.
 - `virsh domifaddr` may only show `serverb` if guest agent / DHCP reporting is incomplete on `servera`. The lab can still be healthy.
+- `rhcsa.sh` brings the lab up before opening tmux. Depending on your host sudo policy, you may still see a host-side sudo prompt before the session opens.
 
 ---
 
 ## Next recommended follow-up work
 
-- validate and wire in `bootstrap-servera.sh` and `bootstrap-serverb.sh`
-- validate `rhcsa-tmux.sh` and `rhcsa.sh`
+- validate and integrate `bootstrap-servera.sh`
+- validate and integrate `bootstrap-serverb.sh`
 - optionally add a README section with sample RHCSA practice tasks
