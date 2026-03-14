@@ -8,10 +8,12 @@ Validated topology:
   - local HTTP package repo
   - NFS server
   - chrony source
+  - Cockpit web console
 - `serverb` — primary exam/practice node
   - storage practice (LVM / partitions / swap / filesystems)
   - SELinux / firewall practice
   - systemd and troubleshooting work
+  - Cockpit web console
 
 Validated network and roles:
 
@@ -80,7 +82,9 @@ Install required packages on Ubuntu:
 
 ```bash
 sudo apt update
-sudo apt install -y   qemu-kvm libvirt-daemon-system libvirt-clients virtinst   virt-manager virt-viewer qemu-utils tmux
+sudo apt install -y \
+  qemu-kvm libvirt-daemon-system libvirt-clients virtinst \
+  virt-manager virt-viewer qemu-utils tmux
 ```
 
 Enable libvirt:
@@ -132,6 +136,7 @@ ISO=/path/to/rhel-10.1-x86_64-dvd.iso ./scripts/rhcsa-create-vms.sh
   - NFS server
   - chronyd
   - firewalld
+  - Cockpit web console
 
 ### ServerB
 
@@ -144,6 +149,8 @@ ISO=/path/to/rhel-10.1-x86_64-dvd.iso ./scripts/rhcsa-create-vms.sh
   - `vdc` 10 GiB — VDO / additional storage tasks
   - `vdd` 2 GiB — spare disk
   - `vde` 10 GiB — spare disk
+- services:
+  - Cockpit web console
 
 During OS installation on `serverb`, install to `vda` only and leave `vdb` / `vdc` / `vdd` / `vde` untouched.
 
@@ -170,6 +177,19 @@ Examples:
 - the Task 2 exam-practice doc may use `servera` by hostname for repo-consumer drills to reinforce name resolution and service access
 
 Use the runbook to build and maintain the lab. Use the task docs to practice RHCSA objectives.
+
+---
+
+## Cockpit access
+
+Cockpit is installed on both lab VMs as a browser-based administrative surface and terminal convenience layer. Use it when you want GUI-backed terminal access or quick service, storage, and networking inspection from the Ubuntu host browser.
+
+Recommended URLs:
+
+- `https://192.168.56.10:9090`
+- `https://192.168.56.20:9090`
+
+Use `virt-manager` for GRUB, `rd.break`, and recovery-console work. Use `tmux + SSH` for the fastest repeated CLI practice. See `docs/runbooks/runbook.md` for the installation and access details.
 
 ---
 
@@ -210,21 +230,21 @@ The validated flow used manual guest configuration rather than the repo bootstra
 
 - mount the attached ISO locally
 - create temporary local `dnf` repo definitions from the ISO
-- install `httpd`, `nfs-utils`, `chrony`, `firewalld`
+- install `httpd`, `nfs-utils`, `chrony`, `firewalld`, and `cockpit`
 - set hostname and static IP
 - mount the ISO under `/mnt/rheliso`
 - bind-mount it under `/var/www/html/rhel10`
 - export `/srv/nfs/share`
 - configure chrony as local source
-- open firewall services for HTTP/NFS/NTP
+- open firewall services for HTTP, NFS, NTP, and Cockpit
 
 #### ServerB (validated role)
 
 - temporarily mount the attached ISO and use it for initial `dnf`
 - set hostname and static IP
-- install `chrony`, `nfs-utils`, and `autofs`
+- install `chrony`, `nfs-utils`, `autofs`, and `cockpit`
 - configure HTTP repos pointing to `servera`
-- verify NFS and repo access to `servera`
+- verify NFS, repo access, and Cockpit access
 
 See `docs/runbooks/runbook.md` for the full step-by-step validated baseline sequence.
 

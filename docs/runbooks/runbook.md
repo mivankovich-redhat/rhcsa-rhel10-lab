@@ -9,9 +9,11 @@ Validated topology:
   - local HTTP package repo
   - NFS server
   - chrony source
+  - Cockpit web console
 - `serverb.lab.local` → `192.168.56.20`
   - practice node
   - main RHCSA storage / SELinux / firewall / systemd target
+  - Cockpit web console
 
 Validated lab network:
 
@@ -91,7 +93,9 @@ Install host packages:
 
 ```bash
 sudo apt update
-sudo apt install -y   qemu-kvm libvirt-daemon-system libvirt-clients virtinst   virt-manager virt-viewer qemu-utils tmux
+sudo apt install -y \
+  qemu-kvm libvirt-daemon-system libvirt-clients virtinst \
+  virt-manager virt-viewer qemu-utils tmux
 ```
 
 Enable libvirt:
@@ -177,7 +181,9 @@ Example:
 
 ```bash
 sudo virsh domblklist servera
-sudo virsh change-media servera sda   --insert /var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso   --live --config
+sudo virsh change-media servera sda \
+  --insert /var/lib/libvirt/images/iso/rhel-10.1-x86_64-dvd.iso \
+  --live --config
 ```
 
 Repeat for `serverb` if needed.
@@ -210,7 +216,8 @@ EOF2
 
 dnf clean all
 dnf repolist
-dnf install -y qemu-guest-agent httpd nfs-utils chrony firewalld
+dnf install -y qemu-guest-agent httpd nfs-utils chrony firewalld cockpit
+systemctl enable --now cockpit.socket
 ```
 
 Note: a missing virtio guest-agent port warning is not a functional blocker for the lab.
@@ -244,10 +251,7 @@ echo "RHCSA lab share from servera" > /srv/nfs/share/README.txt
 echo "/srv/nfs/share 192.168.56.0/24(rw,sync,no_subtree_check,no_root_squash)" >> /etc/exports
 exportfs -rav
 
-printf '
-allow 192.168.56.0/24
-local stratum 10
-' >> /etc/chrony.conf
+printf '\nallow 192.168.56.0/24\nlocal stratum 10\n' >> /etc/chrony.conf
 systemctl restart chronyd
 
 firewall-cmd --add-service=http --permanent
@@ -255,6 +259,7 @@ firewall-cmd --add-service=nfs --permanent
 firewall-cmd --add-service=mountd --permanent
 firewall-cmd --add-service=rpc-bind --permanent
 firewall-cmd --add-service=ntp --permanent
+firewall-cmd --add-service=cockpit --permanent
 firewall-cmd --reload
 ```
 
@@ -282,7 +287,7 @@ ip a
 mount | egrep 'rheliso|rhel10'
 showmount -e localhost
 curl -I http://127.0.0.1/
-systemctl is-active httpd nfs-server chronyd firewalld
+systemctl is-active httpd nfs-server chronyd firewalld cockpit.socket
 sudo firewall-cmd --list-services
 ```
 
@@ -293,7 +298,7 @@ Expected results:
 - NFS export visible
 - Apache responds
 - services active
-- firewall includes `http nfs mountd rpc-bind ntp`
+- firewall includes `http nfs mountd rpc-bind ntp cockpit`
 
 A `403 Forbidden` from Apache root is acceptable; it still proves Apache is reachable.
 
@@ -343,13 +348,12 @@ EOF2
 
 Again, if the NetworkManager connection name differs, use the exact connection name from `nmcli con show`.
 
-### 8.3 Install client packages and chrony config
+### 8.3 Install client packages, Cockpit, and chrony config
 
 ```bash
-dnf install -y chrony nfs-utils autofs
-printf '
-server 192.168.56.10 iburst
-' >> /etc/chrony.conf
+dnf install -y chrony nfs-utils autofs cockpit
+systemctl enable --now cockpit.socket
+printf '\nserver 192.168.56.10 iburst\n' >> /etc/chrony.conf
 systemctl enable --now chronyd
 systemctl restart chronyd
 ```
@@ -391,6 +395,7 @@ showmount -e servera
 chronyc sources -v
 lsblk
 dnf repolist
+systemctl is-active cockpit.socket
 ```
 
 Expected results:
@@ -400,10 +405,46 @@ Expected results:
 - NFS export visible
 - `lsblk` shows `vda`, `vdb`, `vdc`, `vdd`, `vde`
 - `dnf repolist` shows HTTP repos backed by `servera`
+- Cockpit socket is active
 
 ---
 
-## 9. Host SSH setup for tmux helpers
+## 9. Cockpit access on servera and serverb
+
+Cockpit is installed on both VMs as a browser-based administrative surface and terminal convenience layer.
+
+Access from the Ubuntu host browser:
+
+- `https://192.168.56.10:9090`
+- `https://192.168.56.20:9090`
+
+If host-side name resolution is configured, hostname-based access also works:
+
+- `https://servera:9090`
+- `https://serverb:9090`
+
+Use this split:
+
+- `virt-manager` for boot, GRUB, `rd.break`, and emergency console work
+- Cockpit for GUI-backed terminal access and quick inspection of services, storage, logs, networking, and system state
+- `tmux + SSH` for the fastest repeated CLI practice
+
+Notes:
+
+- on `servera`, Cockpit requires the `cockpit` service to be open in `firewalld`
+- on `serverb`, baseline access works without additional firewall work because `firewalld` is not part of the validated baseline there
+- if you enable `firewalld` on `serverb` later, also open the `cockpit` service
+
+Quick validation:
+
+```bash
+systemctl is-active cockpit.socket
+ss -ltnp | grep 9090
+```
+
+---
+
+## 10. Host SSH setup for tmux helpers
 
 The validated tmux helpers use host-side SSH aliases.
 
@@ -445,7 +486,7 @@ ssh serverb-lab
 
 ---
 
-## 10. Baseline capture
+## 11. Baseline capture
 
 Once both guests are in the desired clean state:
 
@@ -475,7 +516,7 @@ Expected:
 
 ---
 
-## 11. Reset-to-clean validation
+## 12. Reset-to-clean validation
 
 Validated flow:
 
@@ -493,7 +534,7 @@ This proves the reset lifecycle is working.
 
 ---
 
-## 12. Day-to-day commands
+## 13. Day-to-day commands
 
 Start the lab:
 
@@ -540,7 +581,7 @@ TMUX_SESSION=rhcsa-followup ./scripts/rhcsa.sh
 
 ---
 
-## 13. Troubleshooting
+## 14. Troubleshooting
 
 ### Apache root returns 403
 
@@ -576,9 +617,21 @@ If guest-agent or DHCP reporting is incomplete, `rhcsa-status.sh` may still pass
 
 That can be expected depending on the host sudo policy. The validated wrapper brings the lab up before creating the tmux session.
 
+### Cockpit page does not load
+
+Check:
+
+```bash
+systemctl status cockpit.socket --no-pager
+ss -ltnp | grep 9090
+curl -kI https://127.0.0.1:9090
+```
+
+On `servera`, also verify `firewalld` allows the `cockpit` service.
+
 ---
 
-## 14. Recommended next improvements
+## 15. Recommended next improvements
 
 - validate and integrate `bootstrap-servera.sh`
 - validate and integrate `bootstrap-serverb.sh`
