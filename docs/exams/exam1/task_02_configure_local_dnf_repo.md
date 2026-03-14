@@ -1,5 +1,9 @@
 # Exam 1 - Task 2 - Configure Local DNF/YUM Repositories
 
+## Lab Convenience Note
+
+Cockpit is installed on both `servera` and `serverb` in this lab. You may use the Cockpit terminal or the tmux/SSH workflow to perform and validate this task. The actual repository configuration steps remain CLI-driven and exam-safe.
+
 ## Task
 
 Configure local package repositories for RHCSA-style practice on `servera` and `serverb`.
