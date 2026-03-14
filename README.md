@@ -33,6 +33,16 @@ This workflow has been validated end to end and tagged as `validated-two-node-la
 
 ---
 
+## Host platform support
+
+This lab is currently **validated on Ubuntu hosts**.
+
+Because the lab uses standard KVM/libvirt tooling, **Fedora Workstation** and **RHEL** hosts should also be viable, but they are currently **unvalidated** in this repo. The main differences are expected to be host package installation, SELinux/firewalld behavior, libvirt access setup, and other host-side integration details.
+
+Until additional host-specific documentation is added, Ubuntu remains the primary validated host platform.
+
+---
+
 ## What is validated
 
 Tested and validated in this repo:
