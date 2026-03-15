@@ -1,8 +1,26 @@
 # Exam 1 - Task 2 - Configure Local DNF/YUM Repositories
 
-## Lab Convenience Note
+## Exam Workflow Note
 
-Cockpit is installed on both `servera` and `serverb` in this lab. You may use the Cockpit terminal or the tmux/SSH workflow to perform and validate this task. The actual repository configuration steps remain CLI-driven and exam-safe.
+Use this task in the following order during practice:
+
+1. get a working repository on the host
+2. validate package access
+3. install and enable Cockpit **after** repo access exists, unless Cockpit is already installed
+4. continue the rest of the task flow using Cockpit, tmux/SSH, or the VM console as needed
+
+This avoids the dependency loop where `cockpit` cannot be installed until package repositories are available.
+
+## Cockpit Usage Note
+
+If `cockpit` is already installed on a host, you may enable and use it immediately:
+
+```bash
+systemctl enable --now cockpit.socket
+systemctl status cockpit.socket --no-pager
+```
+
+If `cockpit` is **not** installed, complete Method A or Method B for that host first, then install it.
 
 ## Task
 
@@ -95,6 +113,24 @@ dnf repolist
 dnf --disablerepo='*' --enablerepo=BaseOS --enablerepo=AppStream list available | head
 ```
 
+### 4) Optional post-repo step: install Cockpit on `servera`
+
+Once Method A is working on `servera`, install Cockpit if it is not already present:
+
+```bash
+dnf install -y cockpit
+systemctl enable --now cockpit.socket
+firewall-cmd --add-service=cockpit --permanent
+firewall-cmd --reload
+systemctl status cockpit.socket --no-pager
+```
+
+Validate from the Ubuntu host browser:
+
+```text
+https://192.168.56.10:9090
+```
+
 ### Green Criteria
 
 Method A on `servera` is green when:
@@ -141,6 +177,29 @@ cat /etc/yum.repos.d/local.repo
 dnf clean all
 dnf repolist
 dnf --disablerepo='*' --enablerepo=BaseOS --enablerepo=AppStream list available | head
+```
+
+### 4) Optional post-repo step: install Cockpit on `serverb`
+
+Once Method A is working on `serverb`, install Cockpit if it is not already present:
+
+```bash
+dnf install -y cockpit
+systemctl enable --now cockpit.socket
+systemctl status cockpit.socket --no-pager
+```
+
+If you later enable `firewalld` on `serverb`, also open the Cockpit service:
+
+```bash
+firewall-cmd --add-service=cockpit --permanent
+firewall-cmd --reload
+```
+
+Validate from the Ubuntu host browser:
+
+```text
+https://192.168.56.20:9090
 ```
 
 ### Method A Green Criteria
@@ -207,6 +266,18 @@ cat /etc/yum.repos.d/localhost_rhel10_AppStream.repo
 dnf clean all
 dnf repolist all
 dnf --disablerepo='*' --enablerepo=localhost_rhel10_BaseOS --enablerepo=localhost_rhel10_AppStream list available | head
+```
+
+### 5) Optional post-repo step: install Cockpit on `servera`
+
+Once Method B is working on `servera`, install Cockpit if it is not already present:
+
+```bash
+dnf install -y cockpit
+systemctl enable --now cockpit.socket
+firewall-cmd --add-service=cockpit --permanent
+firewall-cmd --reload
+systemctl status cockpit.socket --no-pager
 ```
 
 ### Method B Green Criteria
@@ -279,6 +350,18 @@ dnf repolist all
 dnf --disablerepo='*' --enablerepo="$(basename "$BASEOS_REPO_FILE" .repo)" --enablerepo="$(basename "$APPSTREAM_REPO_FILE" .repo)" list available | head
 ```
 
+### 5) Optional post-repo step: install Cockpit on `serverb`
+
+Once Method B is working on `serverb`, install Cockpit if it is not already present:
+
+```bash
+dnf install -y cockpit
+systemctl enable --now cockpit.socket
+systemctl status cockpit.socket --no-pager
+```
+
+If you later enable `firewalld` on `serverb`, also open the Cockpit service.
+
 ### Practice Variant: Green Criteria
 
 Method B on `serverb` is green when:
@@ -295,15 +378,18 @@ Use this order for a complete repetition cycle:
 
 1. Reset repo state on `servera`
 2. Practice Method A on `servera`
-3. Reset repo state on `serverb`
-4. Practice Method A on `serverb`
-5. Reset repo state on `servera`
-6. Practice Method B on `servera`
-7. Reset repo state on `serverb`
-8. Practice Method B on `serverb` using `servera` as the source
+3. Install and validate Cockpit on `servera` if needed
+4. Reset repo state on `serverb`
+5. Practice Method A on `serverb`
+6. Install and validate Cockpit on `serverb` if needed
+7. Reset repo state on `servera`
+8. Practice Method B on `servera`
+9. Reset repo state on `serverb`
+10. Practice Method B on `serverb` using `servera` as the source
 
 ## Common Mistakes
 
+- trying to install `cockpit` before any working repos exist
 - forgetting to remove older practice repo files before retesting
 - forgetting `AppStream`
 - using `baseurl=/mnt/...` instead of `file:///mnt/...`
