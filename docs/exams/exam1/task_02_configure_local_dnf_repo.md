@@ -69,17 +69,16 @@ dnf repolist all
 
 ## Method A - Local Installation Media on `servera`
 
-### 1) Mount the installation media on `/mnt`
-
-If the installation media is already attached as `/dev/sr0`, mount it on `/mnt`:
+### 1) Ensure the installation media is mounted persistently at `/mnt/rheliso`
 
 ```bash
-mkdir -p /mnt
-mount | grep ' /mnt ' || mount /dev/sr0 /mnt
-ls /mnt
+mkdir -p /mnt/rheliso
+grep -q '^/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0$' /etc/fstab || echo '/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0' >> /etc/fstab
+mount -a
+ls /mnt/rheliso
 ```
 
-Expected directories:
+Expected output includes at least:
 
 ```text
 BaseOS
@@ -92,13 +91,13 @@ AppStream
 cat > /etc/yum.repos.d/local.repo <<'EOF'
 [BaseOS]
 name=RHEL 10 BaseOS
-baseurl=file:///mnt/BaseOS
+baseurl=file:///mnt/rheliso/BaseOS
 enabled=1
 gpgcheck=0
 
 [AppStream]
 name=RHEL 10 AppStream
-baseurl=file:///mnt/AppStream
+baseurl=file:///mnt/rheliso/AppStream
 enabled=1
 gpgcheck=0
 EOF
@@ -107,6 +106,9 @@ EOF
 ### 3) Validate
 
 ```bash
+cat /etc/fstab
+mount | grep rheliso
+ls /mnt/rheliso
 cat /etc/yum.repos.d/local.repo
 dnf clean all
 dnf repolist
@@ -135,8 +137,9 @@ https://192.168.56.10:9090
 
 Method A on `servera` is green when:
 
-- `/mnt` contains `BaseOS` and `AppStream`
-- `/etc/yum.repos.d/local.repo` exists with correct `file:///mnt/...` baseurls
+- `/mnt/rheliso` contains `BaseOS` and `AppStream`
+- `/etc/fstab` contains the persistent `/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0` entry
+- `/etc/yum.repos.d/local.repo` exists with correct `file:///mnt/rheliso/...` baseurls
 - `dnf repolist` shows `BaseOS` and `AppStream`
 - isolated package listing works with only those two repos enabled
 
@@ -144,12 +147,13 @@ Method A on `servera` is green when:
 
 Repeat the same workflow on `serverb`.
 
-### 1) Method A: Mount the installation media on `/mnt`
+### 1) Method A: Ensure the installation media is mounted persistently at `/mnt/rheliso`
 
 ```bash
-mkdir -p /mnt
-mount | grep ' /mnt ' || mount /dev/sr0 /mnt
-ls /mnt
+mkdir -p /mnt/rheliso
+grep -q '^/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0$' /etc/fstab || echo '/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0' >> /etc/fstab
+mount -a
+ls /mnt/rheliso
 ```
 
 ### 2) Method A: Create the local repository file
@@ -158,13 +162,13 @@ ls /mnt
 cat > /etc/yum.repos.d/local.repo <<'EOF'
 [BaseOS]
 name=RHEL 10 BaseOS
-baseurl=file:///mnt/BaseOS
+baseurl=file:///mnt/rheliso/BaseOS
 enabled=1
 gpgcheck=0
 
 [AppStream]
 name=RHEL 10 AppStream
-baseurl=file:///mnt/AppStream
+baseurl=file:///mnt/rheliso/AppStream
 enabled=1
 gpgcheck=0
 EOF
@@ -173,6 +177,9 @@ EOF
 ### 3) Method A Validate
 
 ```bash
+cat /etc/fstab
+mount | grep rheliso
+ls /mnt/rheliso
 cat /etc/yum.repos.d/local.repo
 dnf clean all
 dnf repolist
@@ -206,8 +213,9 @@ https://192.168.56.20:9090
 
 Method A on `serverb` is green when:
 
-- `/mnt` contains `BaseOS` and `AppStream`
-- `/etc/yum.repos.d/local.repo` exists with correct `file:///mnt/...` baseurls
+- `/mnt/rheliso` contains `BaseOS` and `AppStream`
+- `/etc/fstab` contains the persistent `/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0` entry
+- `/etc/yum.repos.d/local.repo` exists with correct `file:///mnt/rheliso/...` baseurls
 - `dnf repolist` shows `BaseOS` and `AppStream`
 - isolated package listing works with only those two repos enabled
 
@@ -392,7 +400,8 @@ Use this order for a complete repetition cycle:
 - trying to install `cockpit` before any working repos exist
 - forgetting to remove older practice repo files before retesting
 - forgetting `AppStream`
-- using `baseurl=/mnt/...` instead of `file:///mnt/...`
+- using `baseurl=/mnt/...` instead of `file:///mnt/rheliso/...`
+- appending duplicate `/etc/fstab` entries for `/mnt/rheliso`
 - assuming URL-based repo IDs instead of inspecting what was generated
 - forgetting to set `gpgcheck=0` when the task explicitly requires it
 - validating against all enabled repos instead of isolating only the target repos
