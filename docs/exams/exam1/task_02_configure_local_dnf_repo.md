@@ -11,6 +11,16 @@ Use this task in the following order during practice:
 
 This avoids the dependency loop where `cockpit` cannot be installed until package repositories are available.
 
+## Repository Source Variants
+
+The real exam objective is to configure access to RPM repositories. The exact source may vary by task wording or environment.
+
+This task lets you practice three realistic variants:
+
+1. **Method A** - attached optical device such as `/dev/sr0`
+2. **Method B** - URL-based repository
+3. **Method C** - ISO file downloaded locally and mounted with `loop`
+
 ## Cockpit Usage Note
 
 If `cockpit` is already installed on a host, you may enable and use it immediately:
@@ -20,16 +30,11 @@ systemctl enable --now cockpit.socket
 systemctl status cockpit.socket --no-pager
 ```
 
-If `cockpit` is **not** installed, complete Method A or Method B for that host first, then install it.
+If `cockpit` is **not** installed, complete Method A, B, or C for that host first, then install it.
 
 ## Task
 
 Configure local package repositories for RHCSA-style practice on `servera` and `serverb`.
-
-This practice covers two methods:
-
-1. **Method A** - configure `BaseOS` and `AppStream` from locally mounted installation media
-2. **Method B** - configure `BaseOS` and `AppStream` from URL-based repositories using `dnf config-manager --add-repo`
 
 ## Domains Covered
 
@@ -42,11 +47,11 @@ This practice covers two methods:
 
 ## Objective
 
-Practice both local-media and URL-based repository configuration on both `servera` and `serverb`, with a clean reset step before each run so repository state is unambiguous.
+Practice optical-device, URL-based, and loop-mounted ISO repository configuration patterns so you can adapt to task wording on the real exam.
 
 ## Important Caveat
 
-The primary task here is **local repository configuration**.
+The primary task here is **repository configuration**.
 
 A possible lab variation is configuring `serverb` to consume repositories served by `servera` over HTTP. That is worth practicing, but it is a different topology from mounting installation media locally.
 
@@ -55,6 +60,9 @@ A possible lab variation is configuring `serverb` to consume repositories served
 Run this before testing each method on each host.
 
 ```bash
+umount /mnt/rheliso 2>/dev/null || true
+umount /media/cdrom 2>/dev/null || true
+
 mkdir -p /root/repo-practice-backup
 
 mv /etc/yum.repos.d/local.repo /root/repo-practice-backup/ 2>/dev/null || true
@@ -73,7 +81,7 @@ dnf repolist all
 
 ```bash
 mkdir -p /mnt/rheliso
-grep -q '^/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0$' /etc/fstab || echo '/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0' >> /etc/fstab
+echo '/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0' >> /etc/fstab
 mount -a
 ls /mnt/rheliso
 ```
@@ -138,7 +146,7 @@ https://192.168.56.10:9090
 Method A on `servera` is green when:
 
 - `/mnt/rheliso` contains `BaseOS` and `AppStream`
-- `/etc/fstab` contains the persistent `/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0` entry
+- `/etc/fstab` contains the `/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0` entry
 - `/etc/yum.repos.d/local.repo` exists with correct `file:///mnt/rheliso/...` baseurls
 - `dnf repolist` shows `BaseOS` and `AppStream`
 - isolated package listing works with only those two repos enabled
@@ -151,7 +159,7 @@ Repeat the same workflow on `serverb`.
 
 ```bash
 mkdir -p /mnt/rheliso
-grep -q '^/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0$' /etc/fstab || echo '/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0' >> /etc/fstab
+echo '/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0' >> /etc/fstab
 mount -a
 ls /mnt/rheliso
 ```
@@ -214,7 +222,7 @@ https://192.168.56.20:9090
 Method A on `serverb` is green when:
 
 - `/mnt/rheliso` contains `BaseOS` and `AppStream`
-- `/etc/fstab` contains the persistent `/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0` entry
+- `/etc/fstab` contains the `/dev/sr0 /mnt/rheliso iso9660 ro,nofail 0 0` entry
 - `/etc/yum.repos.d/local.repo` exists with correct `file:///mnt/rheliso/...` baseurls
 - `dnf repolist` shows `BaseOS` and `AppStream`
 - isolated package listing works with only those two repos enabled
@@ -224,6 +232,9 @@ Method A on `serverb` is green when:
 Run the prep block again before starting Method B on each host.
 
 ```bash
+umount /mnt/rheliso 2>/dev/null || true
+umount /media/cdrom 2>/dev/null || true
+
 mkdir -p /root/repo-practice-backup
 
 mv /etc/yum.repos.d/local.repo /root/repo-practice-backup/ 2>/dev/null || true
@@ -266,7 +277,7 @@ sed -i 's/^gpgcheck=.*/gpgcheck=0/' /etc/yum.repos.d/localhost_rhel10_BaseOS.rep
 sed -i 's/^gpgcheck=.*/gpgcheck=0/' /etc/yum.repos.d/localhost_rhel10_AppStream.repo
 ```
 
-### 4) Validate
+### 4) Method B Validate
 
 ```bash
 cat /etc/yum.repos.d/localhost_rhel10_BaseOS.repo
@@ -380,6 +391,107 @@ Method B on `serverb` is green when:
 - both appear enabled in `dnf repolist all`
 - isolated package listing works with only those two repos enabled
 
+## Reset Again Before Method C
+
+Run the prep block again before starting Method C.
+
+```bash
+umount /mnt/rheliso 2>/dev/null || true
+umount /media/cdrom 2>/dev/null || true
+rm -f /root/boot.iso
+
+mkdir -p /root/repo-practice-backup
+
+mv /etc/yum.repos.d/local.repo /root/repo-practice-backup/ 2>/dev/null || true
+
+dnf clean all
+dnf repolist all
+```
+
+## Method C - ISO File Downloaded Locally and Mounted via Loop Device
+
+This method practices the case where the task gives you an ISO file path instead of an attached optical device.
+
+### 1) Download the ISO locally
+
+```bash
+cd /root
+wget ftp://192.168.0.254/pub/boot.iso
+```
+
+### 2) Mount it persistently at `/media/cdrom`
+
+```bash
+mkdir -p /media/cdrom
+echo '/root/boot.iso /media/cdrom iso9660 ro,loop 0 0' >> /etc/fstab
+mount -a
+ls /media/cdrom
+```
+
+Expected output includes at least:
+
+```text
+BaseOS
+AppStream
+```
+
+### 3) Create the local repository file
+
+```bash
+cat > /etc/yum.repos.d/local.repo <<'EOF'
+[BaseOS]
+name=RHEL 10 BaseOS
+baseurl=file:///media/cdrom/BaseOS
+enabled=1
+gpgcheck=0
+
+[AppStream]
+name=RHEL 10 AppStream
+baseurl=file:///media/cdrom/AppStream
+enabled=1
+gpgcheck=0
+EOF
+```
+
+### 4) Method C Validate
+
+```bash
+cat /etc/fstab
+mount | grep cdrom
+ls /media/cdrom
+cat /etc/yum.repos.d/local.repo
+dnf clean all
+dnf repolist
+dnf --disablerepo='*' --enablerepo=BaseOS --enablerepo=AppStream list available | head
+```
+
+### 5) Optional post-repo step: install Cockpit
+
+Once Method C is working on the host, install Cockpit if it is not already present:
+
+```bash
+dnf install -y cockpit
+systemctl enable --now cockpit.socket
+systemctl status cockpit.socket --no-pager
+```
+
+If `firewalld` is enabled on that host, also open the Cockpit service:
+
+```bash
+firewall-cmd --add-service=cockpit --permanent
+firewall-cmd --reload
+```
+
+### Method C Green Criteria
+
+Method C is green when:
+
+- `/root/boot.iso` exists
+- `/media/cdrom` contains `BaseOS` and `AppStream`
+- `/etc/fstab` contains the `/root/boot.iso /media/cdrom iso9660 ro,loop 0 0` entry
+- `/etc/yum.repos.d/local.repo` exists with correct `file:///media/cdrom/...` baseurls
+- isolated package listing works with only those two repos enabled
+
 ## Suggested Practice Run Order
 
 Use this order for a complete repetition cycle:
@@ -394,6 +506,8 @@ Use this order for a complete repetition cycle:
 8. Practice Method B on `servera`
 9. Reset repo state on `serverb`
 10. Practice Method B on `serverb` using `servera` as the source
+11. Reset repo state
+12. Practice Method C on a host where you want loop-mount reps
 
 ## Common Mistakes
 
@@ -401,7 +515,8 @@ Use this order for a complete repetition cycle:
 - forgetting to remove older practice repo files before retesting
 - forgetting `AppStream`
 - using `baseurl=/mnt/...` instead of `file:///mnt/rheliso/...`
-- appending duplicate `/etc/fstab` entries for `/mnt/rheliso`
+- using `loop` for `/dev/sr0` instead of only for ISO files
+- appending duplicate `/etc/fstab` entries for `/mnt/rheliso` or `/media/cdrom`
 - assuming URL-based repo IDs instead of inspecting what was generated
 - forgetting to set `gpgcheck=0` when the task explicitly requires it
 - validating against all enabled repos instead of isolating only the target repos
@@ -418,6 +533,8 @@ A repository method is green when:
 
 ## Lab Note
 
-Method A is the primary answer for a task that explicitly says to mount installation media and configure `BaseOS` and `AppStream` from it.
+Method A is the primary answer for a task that explicitly says to use attached installation media.
 
 Method B is a valid alternate pattern when a repository URL is provided or when one system is intended to consume repositories served by another host.
+
+Method C is the right pattern when the task gives you a regular ISO file path and expects a loop-mounted filesystem.
