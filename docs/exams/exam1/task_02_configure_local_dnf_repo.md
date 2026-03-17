@@ -18,7 +18,7 @@ The real exam objective is to configure access to RPM repositories. The exact so
 This task lets you practice three realistic variants:
 
 1. **Method A** - attached optical device such as `/dev/sr0`
-2. **Method B** - URL-based repository
+2. **Method B** - repo server URLs
 3. **Method C** - ISO file downloaded locally and mounted with `loop`
 
 ## Cockpit Usage Note
@@ -247,47 +247,57 @@ dnf clean all
 dnf repolist all
 ```
 
-## Method B - URL-Based Repositories on `servera`
+## Method B - Repo Server URLs Using `servera`
 
-This method assumes `servera` is serving the installation tree over HTTP from `/var/www/html/rhel10`.
+This method matches the exam-style pattern where the task gives you two explicit repository URLs.
 
-### 1) Verify the HTTP content is reachable
+In this lab, use the actual repo-server URLs hosted by `servera`:
+
+- `http://192.168.56.10/rhel10/BaseOS`
+- `http://192.168.56.10/rhel10/AppStream`
+
+On the real exam, replace these with the exact repo server IP and file paths given in the task.
+
+### Method B on `servera`
+
+#### 1) Verify the repo server URLs are reachable
 
 ```bash
 systemctl enable --now httpd
-curl -I http://localhost/rhel10/BaseOS/repodata/repomd.xml
-curl -I http://localhost/rhel10/AppStream/repodata/repomd.xml
+curl -I http://192.168.56.10/rhel10/BaseOS/repodata/repomd.xml
+curl -I http://192.168.56.10/rhel10/AppStream/repodata/repomd.xml
 ```
 
 Expected result: HTTP success such as `200 OK`.
 
-### 2) Add the repositories
+#### 2) Create the repository file
 
 ```bash
-dnf config-manager --add-repo="http://localhost/rhel10/BaseOS"
-dnf config-manager --add-repo="http://localhost/rhel10/AppStream"
+cat > /etc/yum.repos.d/local.repo <<'EOF'
+[BaseOS]
+name=RHEL 10 BaseOS
+baseurl=http://192.168.56.10/rhel10/BaseOS
+enabled=1
+gpgcheck=0
+
+[AppStream]
+name=RHEL 10 AppStream
+baseurl=http://192.168.56.10/rhel10/AppStream
+enabled=1
+gpgcheck=0
+EOF
 ```
 
-### 3) Set `gpgcheck=0` in the generated repo files
+#### 3) Validate
 
 ```bash
-grep -q '^gpgcheck=' /etc/yum.repos.d/localhost_rhel10_BaseOS.repo || echo 'gpgcheck=0' >> /etc/yum.repos.d/localhost_rhel10_BaseOS.repo
-grep -q '^gpgcheck=' /etc/yum.repos.d/localhost_rhel10_AppStream.repo || echo 'gpgcheck=0' >> /etc/yum.repos.d/localhost_rhel10_AppStream.repo
-sed -i 's/^gpgcheck=.*/gpgcheck=0/' /etc/yum.repos.d/localhost_rhel10_BaseOS.repo
-sed -i 's/^gpgcheck=.*/gpgcheck=0/' /etc/yum.repos.d/localhost_rhel10_AppStream.repo
-```
-
-### 4) Method B Validate
-
-```bash
-cat /etc/yum.repos.d/localhost_rhel10_BaseOS.repo
-cat /etc/yum.repos.d/localhost_rhel10_AppStream.repo
+cat /etc/yum.repos.d/local.repo
 dnf clean all
-dnf repolist all
-dnf --disablerepo='*' --enablerepo=localhost_rhel10_BaseOS --enablerepo=localhost_rhel10_AppStream list available | head
+dnf repolist
+dnf --disablerepo='*' --enablerepo=BaseOS --enablerepo=AppStream list available | head
 ```
 
-### 5) Optional post-repo step: install Cockpit on `servera`
+#### 4) Optional post-repo step: install Cockpit on `servera`
 
 Once Method B is working on `servera`, install Cockpit if it is not already present:
 
@@ -299,77 +309,54 @@ firewall-cmd --reload
 systemctl status cockpit.socket --no-pager
 ```
 
-### Method B Green Criteria
+### Method B Green Criteria on `servera`
 
 Method B on `servera` is green when:
 
-- the two generated `.repo` files exist
-- both use the expected `http://localhost/rhel10/...` baseurls
-- both have `gpgcheck=0`
-- both appear enabled in `dnf repolist all`
+- the repo server URLs respond successfully
+- `/etc/yum.repos.d/local.repo` exists with the expected `http://192.168.56.10/rhel10/...` baseurls
+- `dnf repolist` shows `BaseOS` and `AppStream`
 - isolated package listing works with only those two repos enabled
 
-## Method B - URL-Based Repositories on `serverb`
+### Method B on `serverb`
 
-### Recommended Practice Variant
-
-For `serverb`, use `servera` as the HTTP source. This gives you both URL-based repo practice and remote repo-consumer practice.
-
-Before starting, ensure:
-
-- `servera` is serving `/var/www/html/rhel10`
-- `httpd` is running on `servera`
-- `serverb` can resolve `servera`
-- HTTP access from `serverb` to `servera` is allowed
-
-### 1) Practice Variant: Verify `servera` is reachable from `serverb`
+#### 1) Verify the repo server URLs are reachable
 
 ```bash
-curl -I http://servera/rhel10/BaseOS/repodata/repomd.xml
-curl -I http://servera/rhel10/AppStream/repodata/repomd.xml
+curl -I http://192.168.56.10/rhel10/BaseOS/repodata/repomd.xml
+curl -I http://192.168.56.10/rhel10/AppStream/repodata/repomd.xml
 ```
 
 Expected result: HTTP success such as `200 OK`.
 
-### 2) Practice Variant: Add the repositories from `servera`
+#### 2) Create the repository file
 
 ```bash
-dnf config-manager --add-repo="http://servera/rhel10/BaseOS"
-dnf config-manager --add-repo="http://servera/rhel10/AppStream"
+cat > /etc/yum.repos.d/local.repo <<'EOF'
+[BaseOS]
+name=RHEL 10 BaseOS
+baseurl=http://192.168.56.10/rhel10/BaseOS
+enabled=1
+gpgcheck=0
+
+[AppStream]
+name=RHEL 10 AppStream
+baseurl=http://192.168.56.10/rhel10/AppStream
+enabled=1
+gpgcheck=0
+EOF
 ```
 
-### 3) Practice Variant: Discover the generated repo files and set `gpgcheck=0`
-
-Confirm which files were generated on your host before editing them:
+#### 3) Validate
 
 ```bash
-grep -Rni 'servera/rhel10' /etc/yum.repos.d
-```
-
-Then set variables for the actual generated files and update them:
-
-```bash
-BASEOS_REPO_FILE=$(grep -Ril 'baseurl=http://servera/rhel10/BaseOS' /etc/yum.repos.d)
-APPSTREAM_REPO_FILE=$(grep -Ril 'baseurl=http://servera/rhel10/AppStream' /etc/yum.repos.d)
-
-grep -q '^gpgcheck=' "$BASEOS_REPO_FILE" || echo 'gpgcheck=0' >> "$BASEOS_REPO_FILE"
-grep -q '^gpgcheck=' "$APPSTREAM_REPO_FILE" || echo 'gpgcheck=0' >> "$APPSTREAM_REPO_FILE"
-
-sed -i 's/^gpgcheck=.*/gpgcheck=0/' "$BASEOS_REPO_FILE"
-sed -i 's/^gpgcheck=.*/gpgcheck=0/' "$APPSTREAM_REPO_FILE"
-```
-
-### 4) Practice Variant: Validate
-
-```bash
-cat "$BASEOS_REPO_FILE"
-cat "$APPSTREAM_REPO_FILE"
+cat /etc/yum.repos.d/local.repo
 dnf clean all
-dnf repolist all
-dnf --disablerepo='*' --enablerepo="$(basename "$BASEOS_REPO_FILE" .repo)" --enablerepo="$(basename "$APPSTREAM_REPO_FILE" .repo)" list available | head
+dnf repolist
+dnf --disablerepo='*' --enablerepo=BaseOS --enablerepo=AppStream list available | head
 ```
 
-### 5) Optional post-repo step: install Cockpit on `serverb`
+#### 4) Optional post-repo step: install Cockpit on `serverb`
 
 Once Method B is working on `serverb`, install Cockpit if it is not already present:
 
@@ -381,14 +368,13 @@ systemctl status cockpit.socket --no-pager
 
 If you later enable `firewalld` on `serverb`, also open the Cockpit service.
 
-### Practice Variant: Green Criteria
+### Method B Green Criteria on `serverb`
 
 Method B on `serverb` is green when:
 
-- the two generated `.repo` files exist
-- both use the expected `http://servera/rhel10/...` baseurls
-- both have `gpgcheck=0`
-- both appear enabled in `dnf repolist all`
+- the repo server URLs respond successfully
+- `/etc/yum.repos.d/local.repo` exists with the expected `http://192.168.56.10/rhel10/...` baseurls
+- `dnf repolist` shows `BaseOS` and `AppStream`
 - isolated package listing works with only those two repos enabled
 
 ## Reset Again Before Method C
@@ -505,7 +491,7 @@ Use this order for a complete repetition cycle:
 7. Reset repo state on `servera`
 8. Practice Method B on `servera`
 9. Reset repo state on `serverb`
-10. Practice Method B on `serverb` using `servera` as the source
+10. Practice Method B on `serverb`
 11. Reset repo state
 12. Practice Method C on a host where you want loop-mount reps
 
@@ -517,10 +503,9 @@ Use this order for a complete repetition cycle:
 - using `baseurl=/mnt/...` instead of `file:///mnt/rheliso/...`
 - using `loop` for `/dev/sr0` instead of only for ISO files
 - appending duplicate `/etc/fstab` entries for `/mnt/rheliso` or `/media/cdrom`
-- assuming URL-based repo IDs instead of inspecting what was generated
+- assuming the real exam repo URLs will always be served by the local host
 - forgetting to set `gpgcheck=0` when the task explicitly requires it
 - validating against all enabled repos instead of isolating only the target repos
-- assuming `serverb` should always use `localhost` for Method B
 
 ## Validation Summary
 
@@ -535,6 +520,6 @@ A repository method is green when:
 
 Method A is the primary answer for a task that explicitly says to use attached installation media.
 
-Method B is a valid alternate pattern when a repository URL is provided or when one system is intended to consume repositories served by another host.
+Method B is the right pattern when the task gives you two explicit repo server URLs.
 
 Method C is the right pattern when the task gives you a regular ISO file path and expects a loop-mounted filesystem.
